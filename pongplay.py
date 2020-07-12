@@ -6,6 +6,7 @@ import datetime
 import numpy
 import yaml
 import random
+import math
 
 from htm.bindings.sdr import SDR, Metrics
 from htm.encoders.rdse import RDSE, RDSE_Parameters
@@ -31,7 +32,7 @@ score_b = 0
 import turtle
 
 wn = turtle.Screen()
-wn.title("Pong")
+wn.title("PongPlay")
 wn.bgcolor("black")
 wn.setup(width=screenWidth, height=screenHeight)
 wn.tracer(0)
@@ -162,10 +163,13 @@ class Agent:
     MCThreshold    = 0.5               # Threshold for movement classifier
     OCThreshold    = 0.5               # Threshold for origin point classifier if origin point is close
     OCMaxThreshold = 0.95              # Threshold when checking if this is an origin point
+    feelingDec     = 0.9               # Percentage cells feel feeling into past
 
-    def __init__( self ):
+    def __init__( self, ID ):
         # Set up buffer list
         self.buffer = []                         # Buffer of past input states and motor output.
+
+        self.ID = ID
 
         # Set up encoders
         self.paddleEncoder   = ScalarEncoder( self.paddleEncodeParams )
@@ -211,12 +215,30 @@ class Agent:
             seed                      = 42
         )
 
+        self.tmCopy = TemporalMemory(
+            columnDimensions          = (3699,),
+            cellsPerColumn            = 12,
+            activationThreshold       = 16,
+            initialPermanence         = 0.21,
+            connectedPermanence       = 0.1,
+            minThreshold              = 12,
+            maxNewSynapseCount        = 20,
+            permanenceIncrement       = 0.1,
+            permanenceDecrement       = 0.1,
+            predictedSegmentDecrement = 0.0,
+            maxSegmentsPerCell        = 128,
+            maxSynapsesPerSegment     = 32,
+            seed                      = 42
+        )
+
+        self.cellFeeling = numpy.zeros( 3699 * 12 )
+
         self.motorClassifier = Classifier( alpha=0.1 )               # Detects what motor functions available in this state.
         self.originPointClassifier = Classifier( alpha=0.1 )         # Detects if an origin point is nearby.
         self.motorCategories  = { "None": 0, "Up": 1, "Still": 2, "Down": 3 }     # Dictionary of movement vectors.
         self.originPointStore = []              # Array for storing detected origin points. Index is ID, value is Feeling
 
-        self.feeling = 0
+#        self.posVneg = 0
 
     def EncodeData( self, yPos, ballX, ballY, ballXSpeed, ballYSpeed, motorInput ):
         # Now we call the encoders to create bit representations for each value, and encode them.
@@ -234,7 +256,7 @@ class Agent:
         encoding = SDR( self.encodingWidth ).concatenate([paddleBits, ballBitsX, ballBitsY, ballBitsVelX, ballBitsVelY, motorBits])
         return encoding
 
-    def TemporalPredictor( self, encoding, learning ):
+    def TemporalPredictor( self, encoding, learning, copy ):
         # Create an SDR to represent active columns, This will be populated by the
         # compute method below. It must have the same dimensions as the Spatial Pooler.
         activeColumns = SDR( self.sp.getColumnDimensions() )
@@ -243,54 +265,56 @@ class Agent:
         self.sp.compute(encoding, learning, activeColumns)
 
         # Execute Temporal Memory algorithm over active mini-columns and get the active cells.
-        self.tm.compute(activeColumns, learn=learning)
-
-        activeCells = self.tm.getActiveCells()
+        if copy:
+            self.tmCopy.compute(activeColumns, learn=learning)
+            activeCells = self.tmCopy.getActiveCells()
+        else:
+            self.tm.compute(activeColumns, learn=learning)
+            activeCells = self.tm.getActiveCells()
 
         return activeCells
 
-    def Hippocampus( self, ID, inputAction, yPos, ballX, ballY, ballXSpeed, ballYSpeed ):
-        # Perform learning on TP previous time step motor output by:
-        # Reset TP.
-        self.tm.reset()
-        # Run TP on last time step sense input and motor output (stored in buffer), with learning.
-        if len( self.buffer ) > 0:
-            encoding = self.EncodeData( self.buffer[0][0], self.buffer[0][1],
-                self.buffer[0][2], self.buffer[0][3], self.buffer[0][4],
-                self.buffer[0][5] )
-            activeCells = self.TemporalPredictor( encoding, True )
-            # Run motorClassifier, with learning, feeding it stored motor output.
-            self.motorClassifier.learn ( activeCells, self.buffer[0][5] )
-        # Run TP with current sense data without motor input, with learning:
-        encoding = self.EncodeData( yPos, ballX, ballY, ballXSpeed, ballYSpeed, 0 )
-        activeCells = self.TemporalPredictor( encoding, True )
-        # Run MC with learning.
-        self.motorClassifier.learn ( activeCells, 0 )
+    def OriginPoint( self, feeling ):
+        # Feeling state is triggered through encountering an origin point.
 
-        # Reset temporal memory to signify start of new sequence.
-        # All columns will burst, allowing us to get ranged predictions.
+        # Adjust positive/negative feeling tolerence
+#        self.posVneg += self.feeling
+
+        # Perform learning on this origin point in the buffer. Starting from beginning of buffer,
+        # alter the feeling of the active cells at each time step, based on the current origin
+        # points feeling, and how far in the past the SDR is.
+        tempPoint = self.bufferSize - 1
+
+        while tempPoint >= 0:
+            for x in self.buffer[tempPoint].sparse:
+                self.cellFeeling[x] = feeling * ( self.feelingDec ** tempPoint )
+
+            tempPoint -= 1
+
+        # Reset TP, as arriving at origin point represents the end of a sequence.
         self.tm.reset()
 
-        # Produce motor output:
+    def Hippocampus( self, inputAction, yPos, ballX, ballY, ballXSpeed, ballYSpeed ):
+
         motorScore = [ 0.0, 0.0, 0.0, 0.0 ]         # Keeps track of each motor output weighted score
+        # I want the agent produce motor output.
         if inputAction == 0:
-            # Using TemporalPredictor result,
-            # check motorClassifier in inference mode to find possible motor outputs above some threshold.
-            for idxMC, valMC in enumerate( self.motorClassifier.infer( activeCells ) ):
-                if valMC >= self.MCThreshold:
-                    # Run TemporalPredictor again with present sense date,
-                    # without learning, with that motor input.
-                    encoding = self.EncodeData( yPos, ballX, ballY, ballXSpeed, ballYSpeed, idxMC )
-                    activeCells = self.TemporalPredictor( encoding, False )
+            # Determine motor action:
+            for m in range( 1, 4 ):
+                # Make a copy of TP
+                self.tmCopy = self.tm
 
-                    # Check originPointClassifier in inference mode for detected origin points above some threshold.
-                    for idxOC, valOC in enumerate( self.originPointClassifier.infer( activeCells ) ):
-                        if valOC >= self.OCThreshold:
-                            # Give the motor output a score, a weighted sum of (positive or negative depending
-                            # on detected origin point value) and weighted by the strength observed by OC for
-                            # each origin point. So, if one motor output sees: +A 70%, -B 60%, C 50%, it would
-                            # get a score of +7-6+5=6.
-                            motorScore[idxMC] += self.originPointStore[idxOC] * valOC
+                # Run copy TP in inference mode, with sensory data, and a possible motor output.
+                encoding = self.EncodeData( yPos, ballX, ballY, ballXSpeed, ballYSpeed, m )
+                activeCells = self.TemporalPredictor( encoding, False, copy=True )
+
+                # Calculate the sum feeling of the active (predictive?) cells of copy TP.
+                sumFeeling = 0
+                for x in activeCells.sparse:
+                    sumFeeling += self.cellFeeling[x]
+                motorScore[m] = sumFeeling
+
+        # I want human motor input if agent is in observing mode:
         elif inputAction == 1:
             motorScore[1] = 1.0
         elif inputAction == 2:
@@ -298,76 +322,31 @@ class Agent:
         elif inputAction == 3:
             motorScore[3] = 1.0
 
-        # Check physical state of agent for strong input of positive or negative feeling.
-        # If one exists:
-        if self.feeling > 0 or self.feeling < 0:
-            # Run TemporalPredictor again without motor input or learning.
-            encoding = self.EncodeData( yPos, ballX, ballY, ballXSpeed, ballYSpeed, 0 )
-            activeCells = self.TemporalPredictor( encoding, False )
+        # Determine winning motor function of agent. If there's a tie then choose a random one.
+        largest = []
+        motorScore[0] = -999999   # Supress the 0 element, it represents no motor input and shouldn't be stored.
+        for i in range(1, len( motorScore )):
+            if sorted( motorScore, reverse=True )[0] == motorScore[i]:
+                largest.append(i)
 
-            # Check if this is a stored origin point by checking activeCells from TemporalPredictor
-            # with originPointClassifier, and checking if stored feeling is the same and current.
-            isStored = False
-            OPValue = 0
-            for idxOC2, valOC2 in enumerate( self.originPointClassifier.infer( activeCells ) ):
-                if valOC2 >= self.OCMaxThreshold and self.originPointStore[idxOC2] == self.feeling:
-                    isStored = True
-                    OPValue = idxOC2
-            if isStored == False:
-                # If it’s not stored then create a new origin point with a unique identification,
-                # and current feeling state attached. Learn this origin point in originPointClassifier.
-                self.originPointStore.append(self.feeling)
-                OPValue = len(self.originPointStore) - 1
-                for i in range(0, 99):
-                    self.originPointClassifier.learn ( activeCells, len(self.originPointStore) - 1 )
+        winningMotor = random.choice(largest)
 
-            # Reset TP to indicate start of a new sequence.
-            self.tm.reset()
+        # Run TP with learning, sensory data, and chosen motor output.
+        encoding = self.EncodeData( yPos, ballX, ballY, ballXSpeed, ballYSpeed, winningMotor )
+        activeCells = self.TemporalPredictor( encoding, True, copy=False )
 
-            # Performing learning on this origin point in the buffer,
-            # starting from tempPoint at furthest in the past:
-            tempPoint = self.bufferSize - 1
-
-            while tempPoint >= 0:
-                # Run TemporalPredictor, with learning on, with buffer stored sense and motor input.
-                # Feed input from tempPoint in buffer to present.
-                encoding = self.EncodeData( self.buffer[tempPoint][0], self.buffer[tempPoint][1],
-                    self.buffer[tempPoint][2], self.buffer[tempPoint][3], self.buffer[tempPoint][4],
-                    self.buffer[tempPoint][5] )
-                activeCells = self.TemporalPredictor( encoding, True )
-
-                # Run motorClassifier, with learning, feeding it stored motor output.
-                self.motorClassifier.learn ( activeCells, self.buffer[tempPoint][5] )
-
-                # Run OC with learning feeding it this origin point.
-                for x in range( self.bufferSize - tempPoint ):
-                    self.originPointClassifier.learn ( activeCells, OPValue )
-
-                # Cycle through this multiple times so that learning is enforced,
-                # but run on less time to present so that more recent events are enforced more.
-                # Shift tempPoint forward towards present. Keep doing this until reach the present.
-                tempPoint -= 1
-
-        # Store sensory input for this time-step, and winning motor output,
-        # in ongoing buffer, and delete old entry.
-        bufferInsert = [ yPos, ballX, ballY, ballXSpeed, ballYSpeed, motorScore.index( max( motorScore ) ) ]
+        # Store active cells for this time-step in ongoing buffer, and delete old entry.
+        bufferInsert = activeCells
         self.buffer.insert(0, bufferInsert)
         while len(self.buffer) > self.bufferSize:
             del self.buffer[-1]
 
-#        print (ID, self.originPointStore)
-
-        # Return winning motor function of agent. If there's a tie then choose a random one.
-        largest = []
-        for i in range(len( motorScore )):
-            if sorted(motorScore, reverse=True)[0] == motorScore[i]:
-                largest.append(i)
-
-        return random.choice(largest)
+        # Return winning motor function of agent.
+        return winningMotor
 
 # Create play agents
-leftAgent = Agent()
-rightAgent = Agent()
+leftAgent = Agent("Left")
+rightAgent = Agent("Right")
 
 # Main game loop
 while True:
@@ -382,9 +361,6 @@ while True:
 #    wn.onkey( myPower.learn_or_no_b(), "b" )
 
 #    print (myPower.meActionB)
-
-    leftAgent.feeling  = 0        # Reset feeling states for agents
-    rightAgent.feeling = 0
 
     # Move the ball
     ball.setx(ball.xcor() + ball.dx)
@@ -404,39 +380,39 @@ while True:
     if ball.xcor() > 350:
         # Ball falls off right side of screen. A gets a point.
         score_a += 1
+        rightAgent.OriginPoint( ( math.cos( ( ball.ycor() - paddle_b.ycor() ) / ( math.pi * screenHeight / 10 ) ) - 1 ) / 2 )
         pen.clear()
         pen.write("Player A: {}  Player B: {}".format(score_a, score_b), align="center", font=("Courier", 24, "normal"))
         ball.goto(0, 0)
         ball.dx *= -1
         ball.dy *= random.choice([-1, 1])
-        rightAgent.feeling = -1
 
     elif ball.xcor() < -350:
         # Ball falls off left side of screen. B gets a point.
         score_b += 1
+        leftAgent.OriginPoint( ( math.cos( ( ball.ycor() - paddle_a.ycor() ) / ( math.pi * screenHeight / 10 ) ) - 1 ) / 2 )
         pen.clear()
         pen.write("Player A: {}  Player B: {}".format(score_a, score_b), align="center", font=("Courier", 24, "normal"))
         ball.goto(0, 0)
         ball.dx *= -1
         ball.dy *= random.choice([-1, 1])
-        leftAgent.feeling = -1
 
     # Paddle and ball collisions
     if ball.xcor() < -340 and ball.ycor() < paddle_a.ycor() + 50 and ball.ycor() > paddle_a.ycor() - 50:
         # Ball hits paddle A
         ball.dx *= -1
         ball.goto( -340, ball.ycor() )
-        leftAgent.feeling = 1
+        leftAgent.OriginPoint( 10 )
 
     elif ball.xcor() > 340 and ball.ycor() < paddle_b.ycor() + 50 and ball.ycor() > paddle_b.ycor() - 50:
         # Ball hits paddle B
         ball.dx *= -1
         ball.goto( 340, ball.ycor() )
-        rightAgent.feeling = 1
+        rightAgent.OriginPoint( 10 )
 
     # Run each agents learning algorithm and produce movement.
-    leftMove = leftAgent.Hippocampus( 1, myPower.meActionA, paddle_a.ycor(), ball.xcor(), paddle_a.ycor() - ball.ycor(), ball.dx, ball.dy )
-    rightMove = rightAgent.Hippocampus( 2, myPower.meActionB, paddle_b.ycor(), ball.xcor(), paddle_b.ycor() - ball.ycor(), ball.dx, ball.dy )
+    leftMove = leftAgent.Hippocampus( myPower.meActionA, paddle_a.ycor(), ball.xcor(), paddle_a.ycor() - ball.ycor(), ball.dx, ball.dy )
+    rightMove = rightAgent.Hippocampus( myPower.meActionB, paddle_b.ycor(), ball.xcor(), paddle_b.ycor() - ball.ycor(), ball.dx, ball.dy )
 
     if leftMove == 1:
         paddle_a_up()
