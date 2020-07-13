@@ -231,7 +231,9 @@ class Agent:
             seed                      = 42
         )
 
-        self.cellFeeling = numpy.zeros( 3699 * 12 )
+        zerosArray = numpy.zeros( 3699 * 12 )
+        self.cellFeelingHit = [ 0, zerosArray ]
+        self.cellFeelingMiss = [0, zerosArray ]
 
         self.motorClassifier = Classifier( alpha=0.1 )               # Detects what motor functions available in this state.
         self.originPointClassifier = Classifier( alpha=0.1 )         # Detects if an origin point is nearby.
@@ -242,7 +244,7 @@ class Agent:
 
     def EncodeData( self, yPos, ballX, ballY, ballXSpeed, ballYSpeed, motorInput ):
         # Now we call the encoders to create bit representations for each value, and encode them.
-        paddleBits  = self.paddleEncoder.encode( yPos )
+        paddleBits   = self.paddleEncoder.encode( yPos )
         ballBitsX    = self.ballEncoderX.encode( ballX )
         ballBitsY    = self.ballEncoderY.encode( ballY )
         ballBitsVelX = self.ballEncoderVelX.encode( ballXSpeed )
@@ -274,7 +276,7 @@ class Agent:
 
         return activeCells
 
-    def OriginPoint( self, feeling ):
+    def OriginPoint( self, feeling, hit ):
         # Feeling state is triggered through encountering an origin point.
 
         # Adjust positive/negative feeling tolerence
@@ -283,20 +285,25 @@ class Agent:
         # Perform learning on this origin point in the buffer. Starting from beginning of buffer,
         # alter the feeling of the active cells at each time step, based on the current origin
         # points feeling, and how far in the past the SDR is.
-        tempPoint = self.bufferSize - 1
+        if feeling != 0:
+            tempPoint = self.bufferSize - 1
 
-        while tempPoint >= 0:
-            for x in self.buffer[tempPoint].sparse:
-                self.cellFeeling[x] = feeling * ( self.feelingDec ** tempPoint )
+            while tempPoint >= 0:
+                for x in self.buffer[tempPoint].sparse:
+                    if hit:
+                        self.cellFeelingHit[0] += 1                                                     # Update the count
+                        self.cellFeelingHit[1][x] = feeling * ( self.feelingDec ** tempPoint )          # Compute rolling average feeling score.
 
-            tempPoint -= 1
+                    tempPoint -= 1
 
         # Reset TP, as arriving at origin point represents the end of a sequence.
         self.tm.reset()
 
     def Hippocampus( self, inputAction, yPos, ballX, ballY, ballXSpeed, ballYSpeed ):
+        # The brain control of the agent.
 
         motorScore = [ 0.0, 0.0, 0.0, 0.0 ]         # Keeps track of each motor output weighted score
+
         # I want the agent produce motor output.
         if inputAction == 0:
             # Determine motor action:
@@ -310,8 +317,11 @@ class Agent:
 
                 # Calculate the sum feeling of the active (predictive?) cells of copy TP.
                 sumFeeling = 0
-                for x in activeCells.sparse:
-                    sumFeeling += self.cellFeeling[x]
+                self.tmCopy.activateDendrites( True )
+                predictiveCells = self.tmCopy.getPredictiveCells()
+                for x in predictiveCells.sparse:
+                    sumFeeling += self.cellFeeling[1][x]
+
                 motorScore[m] = sumFeeling
 
         # I want human motor input if agent is in observing mode:
@@ -324,10 +334,15 @@ class Agent:
 
         # Determine winning motor function of agent. If there's a tie then choose a random one.
         largest = []
-        motorScore[0] = -999999   # Supress the 0 element, it represents no motor input and shouldn't be stored.
+        if sorted ( motorScore, reverse=True )[0] == motorScore[0]:             # Omit motorScore[0] since it means something else.
+            index = 1
+        else:
+            index = 0
         for i in range(1, len( motorScore )):
-            if sorted( motorScore, reverse=True )[0] == motorScore[i]:
+            if sorted( motorScore, reverse=True )[index] == motorScore[i]:
                 largest.append(i)
+
+        print (self.ID, motorScore)
 
         winningMotor = random.choice(largest)
 
@@ -380,6 +395,7 @@ while True:
     if ball.xcor() > 350:
         # Ball falls off right side of screen. A gets a point.
         score_a += 1
+        leftAgent.OriginPoint( 0 )
         rightAgent.OriginPoint( ( math.cos( ( ball.ycor() - paddle_b.ycor() ) / ( math.pi * screenHeight / 10 ) ) - 1 ) / 2 )
         pen.clear()
         pen.write("Player A: {}  Player B: {}".format(score_a, score_b), align="center", font=("Courier", 24, "normal"))
@@ -391,6 +407,8 @@ while True:
         # Ball falls off left side of screen. B gets a point.
         score_b += 1
         leftAgent.OriginPoint( ( math.cos( ( ball.ycor() - paddle_a.ycor() ) / ( math.pi * screenHeight / 10 ) ) - 1 ) / 2 )
+        rightAgent.OriginPoint( 0 )
+
         pen.clear()
         pen.write("Player A: {}  Player B: {}".format(score_a, score_b), align="center", font=("Courier", 24, "normal"))
         ball.goto(0, 0)
@@ -402,13 +420,16 @@ while True:
         # Ball hits paddle A
         ball.dx *= -1
         ball.goto( -340, ball.ycor() )
-        leftAgent.OriginPoint( 10 )
+        leftAgent.OriginPoint( 1 )
+        rightAgent.OriginPoint( 0 )
+
 
     elif ball.xcor() > 340 and ball.ycor() < paddle_b.ycor() + 50 and ball.ycor() > paddle_b.ycor() - 50:
         # Ball hits paddle B
         ball.dx *= -1
         ball.goto( 340, ball.ycor() )
-        rightAgent.OriginPoint( 10 )
+        leftAgent.OriginPoint( 0 )
+        rightAgent.OriginPoint( 1 )
 
     # Run each agents learning algorithm and produce movement.
     leftMove = leftAgent.Hippocampus( myPower.meActionA, paddle_a.ycor(), ball.xcor(), paddle_a.ycor() - ball.ycor(), ball.dx, ball.dy )
