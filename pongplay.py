@@ -216,23 +216,21 @@ class Agent:
 
     def FeelingTrig( self, feeling ):
         # Triggered when agent is fed a feeling state.
-
-        if self.feeling > 0 or self.feeling < 0:
+        if feeling > 0 or feeling < 0:
             # Go back through buffer and adjust connections between SP and motor
             # network accordingly, with decreasing strength further back in buffer.
             for ind, val in enumerate( self.buffer ):
                 activeCells = val[0]
                 activeMotorCells = val[1]
                 for motCell in activeMotorCells.sparse:       # Go through all the active motor cells in this buffer time step...
-                    permanance = []
-                    mn.getPermanance( motCell, permanance )   # and get their strength of connections to the sp cells.
-                    for spatCell in permanance:             # Go through all these connected cells...
-                        for actCell in activeCells.sparse:
-                            if spatCell == actCell:         # and check if any are active sp cells in this buffer time step.
-                                # If they are then adjust their connection strength accordingly.
-                                spatCell += ( feeling * 0.05 ) * ( self.bufferSize - ind )
+                    permanence = numpy.zeros(3699, dtype=numpy.float32)
+                    self.mn.getPermanence( motCell, permanence, 0.0 )   # and get their strength of connections to the sp cells.
+#                    print ( permanence )
+                    for actCell in activeCells.sparse:         # Get all the active sp cells in this time step...
+                            # and adjust their connection strength to this active motor cell accordingly.
+                            permanence[actCell] += ( feeling * 0.05 ) * ( self.bufferSize - ind )
 
-                    mn.setPermanance( motCell, permanance )
+                    self.mn.setPermanence( motCell, permanence )
 
     def Hippocampus( self, ID, yPos, ballX, ballY, ballXSpeed, ballYSpeed ):
         # Agents brain center.
@@ -260,8 +258,6 @@ class Agent:
             if sorted(motorScore, reverse=True)[0] == motorScore[i]:
                 largest.append(i)
         winningMotor = random.choice(largest)
-
-        print (winningMotor)
 
         # Adjust connections between SP and motor network to enforce winning motor action slightly.
         # TRY THIS LATER AND SEE IF IT IMPROVES OR NOT
@@ -310,7 +306,7 @@ while True:
         ball.goto(0, 0)
         ball.dx *= -1
         ball.dy *= random.choice([-1, 1])
-        rightAgent.FeelingTrig( -1 )
+        rightAgent.FeelingTrig( numpy.exp( -numpy.absolute( ball.ycor() - paddle_b.ycor() ) / 200 ) - 1 )
 
     elif ball.xcor() < -350:
         # Ball falls off left side of screen. B gets a point.
@@ -320,7 +316,7 @@ while True:
         ball.goto(0, 0)
         ball.dx *= -1
         ball.dy *= random.choice([-1, 1])
-        leftAgent.FeelingTrig( -1 )
+        leftAgent.FeelingTrig( numpy.exp( -numpy.absolute( ball.ycor() - paddle_a.ycor() ) / 200 ) - 1 )
 
     # Paddle and ball collisions
     if ball.xcor() < -340 and ball.ycor() < paddle_a.ycor() + 50 and ball.ycor() > paddle_a.ycor() - 50:
@@ -339,12 +335,12 @@ while True:
     leftMove = leftAgent.Hippocampus( 1, paddle_a.ycor(), ball.xcor(), paddle_a.ycor() - ball.ycor(), ball.dx, ball.dy )
     rightMove = rightAgent.Hippocampus( 2, paddle_b.ycor(), ball.xcor(), paddle_b.ycor() - ball.ycor(), ball.dx, ball.dy )
 
-    if leftMove == 1:
+    if leftMove == 0:
         paddle_a_up()
-    elif leftMove == 3:
+    elif leftMove == 2:
         paddle_a_down()
 
-    if rightMove == 1:
+    if rightMove == 0:
         paddle_b_up()
-    elif rightMove == 3:
+    elif rightMove == 2:
         paddle_b_down()
