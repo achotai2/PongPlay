@@ -100,7 +100,7 @@ def paddle_b_down():
         paddle_b.sety(y)
 
 class Agent:
-    bufferSize = 40                     # Size of buffer of past input states to store.
+    bufferSize = 20                     # Size of buffer of past input states to store.
 
     # Set up encoder parameters
     paddleEncodeParams    = ScalarEncoderParameters()
@@ -155,7 +155,7 @@ class Agent:
         self.motorEncoder    = ScalarEncoder ( self.motorEncodeParams )
 
         self.encodingWidth = ( self.paddleEncoder.size + self.ballEncoderX.size + self.ballEncoderY.size +
-            self.ballEncoderVelX.size + self.ballEncoderVelY.size )
+            self.ballEncoderVelX.size + self.ballEncoderVelY.size + self.motorEncoder.size )
 
         # Set up Spatial Pooler
         self.sp = SpatialPooler(
@@ -191,7 +191,7 @@ class Agent:
             wrapAround                 = True
         )
 
-        tm = TemporalMemory(
+        self.tm = TemporalMemory(
             columnDimensions          = (3699,),
             cellsPerColumn            = 32,
             activationThreshold       = 16,
@@ -207,6 +207,8 @@ class Agent:
             seed=42
         )
 
+        self.motorClassifier = Classifier( alpha=0.1 )               # Detects what motor functions available in this state.
+
     def EncodeData( self, yPos, ballX, ballY, ballXSpeed, ballYSpeed, motorInput ):
         # Now we call the encoders to create bit representations for each value, and encode them.
         paddleBits  = self.paddleEncoder.encode( yPos )
@@ -214,77 +216,101 @@ class Agent:
         ballBitsY    = self.ballEncoderY.encode( ballY )
         ballBitsVelX = self.ballEncoderVelX.encode( ballXSpeed )
         ballBitsVelY = self.ballEncoderVelY.encode( ballYSpeed )
-        if motorInput != 0:
-            motorBits = self.motorEncoder.encode( motorInput )
+        motorBits = self.motorEncoder.encode( motorInput )
 
         # Concatenate all these encodings into one large encoding for Spatial Pooling.
-        if motorInput == 0:
-            encoding = SDR( self.encodingWidth ).concatenate( [ paddleBits, ballBitsX, ballBitsY, ballBitsVelX, ballBitsVelY ] )
-        else:
-            encoding = SDR( self.encodingWidth + self.motorEncoder.size ).concatenate( [ paddleBits, ballBitsX, ballBitsY, ballBitsVelX, ballBitsVelY, motorBits ] )
+        encoding = SDR( self.encodingWidth ).concatenate( [ paddleBits, ballBitsX, ballBitsY, ballBitsVelX, ballBitsVelY, motorBits ] )
 
         return encoding
 
-    def FeelingTrig( self, feeling ):
-        # Triggered when agent is fed a feeling state.
-        if feeling > 0 or feeling < 0:
-            # Go back through buffer and adjust connections between SP and motor
-            # network accordingly, with decreasing strength further back in buffer.
-            for ind, val in enumerate( self.buffer ):
-                activeCells = val[0]
-                activeMotorCells = val[1]
-                for motCell in activeMotorCells.sparse:       # Go through all the active motor cells in this buffer time step...
-                    permanence = numpy.zeros(3699, dtype=numpy.float32)
+    def Hippocampus( self, ID, feeling, yPos, ballX, ballY, ballXSpeed, ballYSpeed ):
+        # Agents brain center.
+
+        # If a feeling state has been triggered:
+        if feeling != 0:
+            # Go through buffer and teach temporal memory network this jumping step.
+            self.tm.reset()
+
+            for buffEntry in self.buffer:
+                encoding = self.EncodeData( buffEntry[ 0 ], buffEntry[ 1 ], buffEntry[ 2 ], buffEntry[ 3 ], buffEntry[ 4 ], buffEntry[ 5 ] )
+            activeColumns = SDR( self.sp.getColumnDimensions() )
+            self.sp.compute( encoding, True, activeColumns )
+            self.tm.compute(activeColumns, True)
+            activeCells = self.tm.getActiveCells()
+
+            encoding = self.EncodeData( yPos, ballX, ballY, ballXSpeed, ballYSpeed, 2 )
+            activeColumns = SDR( self.sp.getColumnDimensions() )
+            self.sp.compute( encoding, True, activeColumns )
+            self.tm.compute(activeColumns, True)
+            activeCellsTM = self.tm.getActiveCells()
+
+            # Also teach the classifier this feeling state.
+            if feeling < 0:
+                self.motorClassifier.learn( activeCellsTM, 0 )
+            elif feeling > 0:
+                self.motorClassifier.learn( activeCellsTM, 1 )
+
+            # Clear the buffer as we're starting a new sequence.
+            self.buffer.clear()
+
+            return 2
+
+        # No feeling state:
+        else:
+            # Run SP with current sense data without motor input, with learning:
+            encoding = self.EncodeData( yPos, ballX, ballY, ballXSpeed, ballYSpeed, 2 )
+            activeColumns = SDR( self.sp.getColumnDimensions() )
+            self.sp.compute( encoding, True, activeColumns )
+
+            # Choose motor output:
+            # Feed SP activated cells to motor network.
+            activeMotorColumns = SDR( self.mn.getColumnDimensions() )
+            self.mn.compute( activeColumns, True, activeMotorColumns )
+
+            # Choose winning motor action by adding up points for activated cells.
+            motorScore = [ 0, 0, 0 ]         # Keeps track of each motor output weighted score UP, STILL, DOWN
+            for idxMC in activeMotorColumns.sparse:
+                motorScore[ idxMC % 3 ] += 1
+            largest = []
+            for i, v in enumerate( motorScore ):
+                if sorted( motorScore, reverse=True )[ 0 ] == motorScore[ i ]:
+                    largest.append( i + 1 )                                         # 1 = UP, 2 = STILL, 3 = DOWN
+            winningMotor = random.choice( largest )
+
+            # Plug in sense data and winningMotor to buffer.
+            bufferInsert = [ yPos, ballX, ballY, ballXSpeed, ballYSpeed, winningMotor ]
+            self.buffer.insert( 0, bufferInsert )
+            while len( self.buffer ) > self.bufferSize:
+                del self.buffer[ -1 ]
+
+            # Plug in winningMotor to temporal memory network and get feeling of predicted end state.
+            self.tm.reset()
+            encoding = self.EncodeData( yPos, ballX, ballY, ballXSpeed, ballYSpeed, winningMotor )
+            activeColumns = SDR( self.sp.getColumnDimensions() )
+            self.sp.compute( encoding, learn=False, activeColumns )
+            self.tm.compute( activeColumns, learn=False )
+            self.tm.activateDendrites( learn=False )
+            activeCellsTM = self.tm.getPredictiveCells()
+
+            # Adjust connections between sp and mn.
+            if len( self.motorClassifier.infer( activeCellsTM ) ) >= 2:
+                for motCell in activeMotorColumns.sparse:       # Go through all the active motor cells in this time step...
+                    permanence = numpy.zeros( 3699, dtype=numpy.float32 )
                     self.mn.getPermanence( motCell, permanence, 0.0 )   # and get their strength of connections to the sp cells.
-                    for actCell in activeCells.sparse:         # Get all the active sp cells in this time step...
-                            # and adjust their connection strength to this active motor cell accordingly.
-                            # (connection strength should vary between -1 and 1, so we use a tanh function)
-                            permVal = numpy.tan( permanence[ actCell ] )
-                            permVal += ( feeling * 0.01 ) * ( self.bufferSize - ind )
-                            permanence[ actCell ] = numpy.tanh( permVal )
+                    for actCell in activeColumns.sparse:         # Get all the active sp cells in this time step...
+                        # and adjust their connection strength to this active motor cell accordingly.
+                        # (connection strength should vary between -1 and 1, so we use a tanh function)
+                        permVal = numpy.tan( permanence[ actCell ] )
+                        if self.motorClassifier.infer( activeCellsTM )[ 0 ] < self.motorClassifier.infer( activeCellsTM )[ 1 ]:
+                            permVal += self.mn.getSynPermActiveInc()
+                        else:
+                            permVal -= self.mn.getSynPermInactiveDec()
+                        permanence[ actCell ] = numpy.tanh( permVal )
 
                     self.mn.setPermanence( motCell, permanence )
 
-    def Hippocampus( self, ID, yPos, ballX, ballY, ballXSpeed, ballYSpeed ):
-        # Agents brain center.
-
-        # Run SP with current sense data without motor input, with learning:
-        encoding = self.EncodeData( yPos, ballX, ballY, ballXSpeed, ballYSpeed, 0 )
-        activeCells = SDR( self.sp.getColumnDimensions() )
-        self.sp.compute(encoding, True, activeCells)
-
-        # Choose motor output:
-        # Feed SP activated cells to motor network.
-        activeMotorCells = SDR( self.mn.getColumnDimensions() )
-        self.mn.compute(activeCells, True, activeMotorCells)
-
-        # Choose winning motor action by adding up points for activated cells.
-        motorScore = [ 0, 0, 0 ]         # Keeps track of each motor output weighted score UP, STILL, DOWN
-        for idxMC in activeMotorCells.sparse:
-            if idxMC % 3 == 0:
-                motorScore[0] += 1
-            elif idxMC % 3 == 1:
-                motorScore[1] += 1
-            elif idxMC % 3 == 2:
-                motorScore[2] += 1
-        largest = []
-        for i, v in enumerate( motorScore ):
-            if sorted(motorScore, reverse=True)[0] == motorScore[i]:
-                largest.append(i)
-        winningMotor = random.choice(largest)
-
-        # Adjust connections between SP and motor network to enforce winning motor action slightly.
-        # TRY THIS LATER AND SEE IF IT IMPROVES OR NOT
-
-        # Update buffer with activated cells in SP and motor network, 0 being most recent.
-        # Each buffer entry contains the cell activations of spatial pooler and motor network.
-        bufferInsert = [ activeCells, activeMotorCells ]
-        self.buffer.insert( 0, bufferInsert )
-        while len(self.buffer) > self.bufferSize:
-            del self.buffer[-1]
-
-        # Return winning motor function of agent.
-        return winningMotor
+            # Return winning motor function of agent.
+            return winningMotor
 
 # Create play agents
 leftAgent = Agent()
@@ -292,10 +318,10 @@ rightAgent = Agent()
 
 # Main game loop
 while True:
-    wn.update()         # Screen update
+    leftAgentFeeling = 0
+    rightAgentFeeling = 0
 
-    leftAgent.feeling  = 0        # Reset feeling states for agents
-    rightAgent.feeling = 0
+    wn.update()         # Screen update
 
     # Move the ball
     ball.setx(ball.xcor() + ball.dx)
@@ -317,44 +343,49 @@ while True:
         score_a += 1
         pen.clear()
         pen.write("Player A: {}  Player B: {}".format(score_a, score_b), align="center", font=("Courier", 24, "normal"))
+        leftAgentFeeling = 1
+        rightAgentFeeling = -1
+#        rightAgentFeeling = numpy.exp( -numpy.absolute( ball.ycor() - paddle_b.ycor() ) / 200 ) - 1
         ball.goto(0, 0)
         ball.dx *= -1
         ball.dy *= random.choice([-1, 1])
-        rightAgent.FeelingTrig( numpy.exp( -numpy.absolute( ball.ycor() - paddle_b.ycor() ) / 200 ) - 1 )
 
     elif ball.xcor() < -350:
         # Ball falls off left side of screen. B gets a point.
         score_b += 1
         pen.clear()
         pen.write("Player A: {}  Player B: {}".format(score_a, score_b), align="center", font=("Courier", 24, "normal"))
+        leftAgentFeeling = -1
+        rightAgentFeeling = 1
         ball.goto(0, 0)
         ball.dx *= -1
         ball.dy *= random.choice([-1, 1])
-        leftAgent.FeelingTrig( -1 )
 
     # Paddle and ball collisions
     if ball.xcor() < -340 and ball.ycor() < paddle_a.ycor() + 50 and ball.ycor() > paddle_a.ycor() - 50:
         # Ball hits paddle A
+        leftAgentFeeling = 1
+        rightAgentFeeling = 0
         ball.dx *= -1
         ball.goto( -340, ball.ycor() )
-        leftAgent.FeelingTrig( 1 )
 
     elif ball.xcor() > 340 and ball.ycor() < paddle_b.ycor() + 50 and ball.ycor() > paddle_b.ycor() - 50:
         # Ball hits paddle B
+        leftAgentFeeling = 0
+        rightAgentFeeling = 1
         ball.dx *= -1
         ball.goto( 340, ball.ycor() )
-        rightAgent.FeelingTrig( 1 )
 
     # Run each agents learning algorithm and produce movement.
-    leftMove = leftAgent.Hippocampus( 1, paddle_a.ycor(), ball.xcor(), paddle_a.ycor() - ball.ycor(), ball.dx, ball.dy )
-    rightMove = rightAgent.Hippocampus( 2, paddle_b.ycor(), ball.xcor(), paddle_b.ycor() - ball.ycor(), ball.dx, ball.dy )
+    leftMove = leftAgent.Hippocampus( 1, leftAgentFeeling, paddle_a.ycor(), ball.xcor(), paddle_a.ycor() - ball.ycor(), ball.dx, ball.dy )
+    rightMove = rightAgent.Hippocampus( 2, rightAgentFeeling, paddle_b.ycor(), ball.xcor(), paddle_b.ycor() - ball.ycor(), ball.dx, ball.dy )
 
-    if leftMove == 0:
+    if leftMove == 1:
         paddle_a_up()
-    elif leftMove == 2:
+    elif leftMove == 3:
         paddle_a_down()
 
-    if rightMove == 0:
+    if rightMove == 1:
         paddle_b_up()
-    elif rightMove == 2:
+    elif rightMove == 3:
         paddle_b_down()
