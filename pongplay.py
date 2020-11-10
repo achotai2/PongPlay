@@ -148,10 +148,10 @@ class Agent:
 
     def __init__( self ):
         # Set up buffer list
-        self.senseBuffer = []                         # Buffer of past input sense data state SDRs and count of times seen, and time last seen.
+        self.senseBuffer = []                         # Buffer of past input sense data state SDRs.
         self.motorBuffer = []                         # Stores a tuple of MP input and winning motor output SDR.
         self.motorStore = []                          # Stores winning SDRs used to produce motor output.
-        self.goalStore = []                           # Stores SDRs of all recognized goal states, and integer for count.
+        self.goalStore = []                           # Stores SDRs of all recognized goal states, and integer for count, and time last seen.
 
         # Set up encoders
         self.paddleEncoder   = ScalarEncoder( self.paddleEncodeParams )
@@ -255,11 +255,11 @@ class Agent:
         aboveThreshold = []
         if listSDR:
             for idx, checkSDR in enumerate( listSDR ):
-                thisOverlap = self.Overlap( senseSDR, checkSDR )
+                thisOverlap = self.Overlap( testSDR, checkSDR )
                 if thisOverlap >= threshold:
                     aboveThreshold.insert( 0, [ thisOverlap, [checkSDR, idx] ] )
         if aboveThreshold:
-            greatest = aboveThreshold.sort( key=lambda tup: tup[0], reverse=True )[ 0 ][ 1 ]
+            greatest = sorted( aboveThreshold, key=lambda tup: tup[0], reverse=True )[ 0 ][ 1 ]
         else:
             greatest = [ SDR( testSDR.size ), -1 ]
 
@@ -277,7 +277,7 @@ class Agent:
         for indx, senseSDR in enumerate( self.senseBuffer ):
             timeBetGoal += 1
             if self.goalStore:
-                testSDR = self.GreatestOverlap( senseSDR[0], [ i[0] for i in self.goalStore ], self.goalThreshold )
+                testSDR = self.GreatestOverlap( senseSDR, [ i[0] for i in self.goalStore ], self.goalThreshold )
                 if testSDR[1] != -1:
                     foundGoals.insert( -1, testSDR )
                     self.goalStore[ testSDR[1] ][1] += 1
@@ -294,6 +294,8 @@ class Agent:
         # Add last senseData state to foundGoals at the end. This is the ball hitting paddle event.
         foundGoals.insert( -1, self.senseBuffer[ -1 ] )
 
+        print (foundGoals)
+
         # Train PM by:
         # Starting with the oldest entry of sense data buffer, choose one.
         nextFound = 0
@@ -303,16 +305,15 @@ class Agent:
             self.tp.reset()
 
             # Feed in chosen entry to TP, with learning.
-            self.tp.compute( senseDataSDR[ 0 ], True )
+            self.tp.compute( senseDataSDR, True )
 #            self.tp.activateDendrites( learn=True )                    DO I NEED TO RUN THIS?
 
             # Check the chosen entry SDR if it is next goal state found above.
             # If chosen entry is next found goal state feed subsequent found goal state into TP, with learning.
             # If chosen entry isn’t next found goal state then feed in next found goal state into TP, with learning.
-            if foundGoals[ nextFound ][ 0 ] == senseSDR[ 0 ]:
+            if self.Overlap( foundGoals[ nextFound ], senseDataSDR ) >= self.goalThreshold and nextFound + 1 != len( foundGoals ):
                 nextFound += 1
-
-            self.tp.compute( foundGoals[ nextFound ][ 0 ], True )
+            self.tp.compute( foundGoals[ nextFound ], True )
 
             # Repeat for all steps of buffer.
 
@@ -402,8 +403,8 @@ class Agent:
 # DOES THIS GET US THE BIGGEST? DOES IT WORK THE WAY IT SHOULD?
             winningSDR = aboveThreshold[0]
         else:
-            if predCellsMP.sparse.size > 0:
-                winningSDR.sparse = random.sample( predCellsMP.sparse, self.motorSDRsize ).sort( reverse=False )
+            if predCellsMP.sparse.size >= self.motorSDRsize:
+                winningSDR.sparse = sorted( random.sample( predCellsMP.sparse, self.motorSDRsize ), reverse=False )
             else:
                 winningSDR.sparse = random.sample( range( 0, predCellsMP.size ), self.motorSDRsize )
 
