@@ -146,12 +146,14 @@ class Agent:
     motorEncodeParams.maximum    = 3
     motorEncodeParams.periodic   = False
 
-    def __init__( self ):
+    def __init__( self, name ):
+        self.ID = name
+
         # Set up buffer list
         self.senseBuffer = []                         # Buffer of past input sense data state SDRs.
         self.motorBuffer = []                         # Stores a tuple of MP input and winning motor output SDR.
         self.motorStore = []                          # Stores winning SDRs used to produce motor output.
-        self.goalStore = []                           # Stores SDRs of all recognized goal states, and integer for count, and time last seen.
+        self.goalStore = []                           # Stores tuple of all recognized goal state SDRs, and integer for count, and time last seen.
 
         # Set up encoders
         self.paddleEncoder   = ScalarEncoder( self.paddleEncodeParams )
@@ -279,7 +281,7 @@ class Agent:
             if self.goalStore:
                 testSDR = self.GreatestOverlap( senseSDR, [ i[0] for i in self.goalStore ], self.goalThreshold )
                 if testSDR[1] != -1:
-                    foundGoals.insert( -1, testSDR )
+                    foundGoals.append( testSDR[0] )
                     self.goalStore[ testSDR[1] ][1] += 1
                     self.goalStore[ testSDR[1] ][2] += 1
                     timeBetGoal = 0
@@ -287,14 +289,12 @@ class Agent:
                 x = random.randint( 0, 100 )
                 y = numpy.power( ( x * numpy.cbrt( self.maxTimeBetGoal / 2 ) / 50 ) - numpy.cbrt( self.maxTimeBetGoal / 2 ), 3 ) + ( self.maxTimeBetGoal / 2 )
                 insStep = int( numpy.rint( y ) )
-                foundGoals.insert( -1, self.senseBuffer[ indx - insStep ] )
-                self.goalStore.insert( -1, [ self.senseBuffer[ indx - insStep ], 1, 1 ] )
+                foundGoals.append( self.senseBuffer[ indx - insStep ] )
+                self.goalStore.append( [ self.senseBuffer[ indx - insStep ], 1, 1 ] )
                 timeBetGoal = insStep
 
         # Add last senseData state to foundGoals at the end. This is the ball hitting paddle event.
-        foundGoals.insert( -1, self.senseBuffer[ -1 ] )
-
-        print (foundGoals)
+        foundGoals.append( self.senseBuffer[ -1 ] )
 
         # Train PM by:
         # Starting with the oldest entry of sense data buffer, choose one.
@@ -340,6 +340,9 @@ class Agent:
             # Feed MP the chosen entry winning goal SDR, with learning.
             self.mp.compute( motorSDR[ 1 ], True )
 
+            # Add winning motor action into motorStore.
+            self.motorStore.append( motorSDR[1] )
+
             # Repeat above for all steps of buffer.
 
         # Clear motor buffer.
@@ -352,6 +355,10 @@ class Agent:
         # If any above threshold choose the one with highest overlap, run habitual network reward event.
         reachedGoal = self.GreatestOverlap( senseSDR, [ i[0] for i in self.goalStore ], self.goalThreshold )
         if reachedGoal[1] != -1:
+            print (self.ID)
+            print (len(self.motorBuffer))
+            print (len(self.motorStore))
+            print (len(self.goalStore))
             self.HabitualNetRewardEvent( reachedGoal )
 
         # Reset PN.
@@ -369,19 +376,19 @@ class Agent:
         # Return winning goal SDR.
         return winningGoal[0]
 
-    def Hippocampus ( self, ID, feeling, yPos, ballX, ballY, ballXSpeed, ballYSpeed ):
+    def Hippocampus ( self, yPos, ballX, ballY, ballXSpeed, ballYSpeed ):
     # Agents brain center.
 
         # Generate SDR for sense data by feeding sense data into SP with learning.
         senseSDR = self.EncodeSenseData( yPos, ballX, ballY, ballXSpeed, ballYSpeed )
 
         # Store sense data SDR into sense data buffer.
-        self.senseBuffer.insert( -1, senseSDR )
+        self.senseBuffer.append( senseSDR )
 
         # Run prediction network, sending it sense data SDR.
-        goalSDR = self.PredictionNetwork ( senseSDR )
+        goalSDR = self.PredictionNetwork( senseSDR )
 
-        # Habitual network: ------------------
+        #------------- Habitual network: -------------
 
         # Reset MP.
         self.mp.reset()
@@ -397,19 +404,19 @@ class Agent:
         # to produce winning SDR. If storage is empty, or not enough overlap threshold then
         # winning SDR = x-number of random predicted cells (where x is a predetermined
         # size of memory storage items).
-        aboveThreshold = self.GreatestOverlap( predCellsMP, [ i[0] for i in self.motorStore ], self.motorThreshold )
+        aboveThreshold = self.GreatestOverlap( predCellsMP, self.motorStore , self.motorThreshold )
         winningSDR = SDR( predCellsMP.size )
         if aboveThreshold[1] != -1:
 # DOES THIS GET US THE BIGGEST? DOES IT WORK THE WAY IT SHOULD?
             winningSDR = aboveThreshold[0]
         else:
             if predCellsMP.sparse.size >= self.motorSDRsize:
-                winningSDR.sparse = sorted( random.sample( predCellsMP.sparse, self.motorSDRsize ), reverse=False )
+                winningSDR.sparse = sorted( numpy.random.choice( predCellsMP.sparse, self.motorSDRsize, replace=False ), reverse=False )
             else:
                 winningSDR.sparse = random.sample( range( 0, predCellsMP.size ), self.motorSDRsize )
 
         # Add MP input SDR and winning SDR as single entry to motor buffer.
-        self.motorBuffer.insert( -1, [ concateSDR, winningSDR ] )
+        self.motorBuffer.append( [ concateSDR, winningSDR ] )
 
         # Compute winning motor output from winning SDR through modular cell ID.
         motorScore = [ 0, 0, 0 ]         # Keeps track of each motor output weighted score UP, STILL, DOWN
@@ -426,13 +433,11 @@ class Agent:
 
 
 # Create play agents
-leftAgent = Agent()
-rightAgent = Agent()
+leftAgent = Agent('Left')
+rightAgent = Agent('Right')
 
-# Main game loop
 while True:
-    leftAgentFeeling = 0
-    rightAgentFeeling = 0
+# Main game loop
 
     wn.update()         # Screen update
 
@@ -467,8 +472,6 @@ while True:
         score_b += 1
         pen.clear()
         pen.write("Player A: {}  Player B: {}".format(score_a, score_b), align="center", font=("Courier", 24, "normal"))
-        leftAgentFeeling = -1
-        rightAgentFeeling = 1
         ball.goto(0, 0)
         ball.dx *= -1
         ball.dy *= random.choice( [ -1, 1 ] )
@@ -478,23 +481,19 @@ while True:
     # Paddle and ball collisions
     if ball.xcor() < -340 and ball.ycor() < paddle_a.ycor() + 50 and ball.ycor() > paddle_a.ycor() - 50:
         # Ball hits paddle A
-        leftAgentFeeling = 1
-        rightAgentFeeling = 0
         ball.dx *= -1
         ball.goto( -340, ball.ycor() )
         leftAgent.PredictionNetRewardEvent()
 
     elif ball.xcor() > 340 and ball.ycor() < paddle_b.ycor() + 50 and ball.ycor() > paddle_b.ycor() - 50:
         # Ball hits paddle B
-        leftAgentFeeling = 0
-        rightAgentFeeling = 1
         ball.dx *= -1
         ball.goto( 340, ball.ycor() )
         rightAgent.PredictionNetRewardEvent()
 
     # Run each agents learning algorithm and produce movement.
-    leftMove = leftAgent.Hippocampus( 1, leftAgentFeeling, paddle_a.ycor(), ball.xcor(), paddle_a.ycor() - ball.ycor(), ball.dx, ball.dy )
-    rightMove = rightAgent.Hippocampus( 2, rightAgentFeeling, paddle_b.ycor(), ball.xcor(), paddle_b.ycor() - ball.ycor(), ball.dx, ball.dy )
+    leftMove = leftAgent.Hippocampus( paddle_a.ycor(), ball.xcor(), paddle_a.ycor() - ball.ycor(), ball.dx, ball.dy )
+    rightMove = rightAgent.Hippocampus( paddle_b.ycor(), ball.xcor(), paddle_b.ycor() - ball.ycor(), ball.dx, ball.dy )
 
     if leftMove == 1:
         paddle_a_up()
