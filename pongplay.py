@@ -6,6 +6,7 @@ import datetime
 import numpy
 import yaml
 import random
+import time
 
 from htm.bindings.sdr import SDR, Metrics
 from htm.encoders.rdse import RDSE, RDSE_Parameters
@@ -100,9 +101,8 @@ def paddle_b_down():
         paddle_b.sety(y)
 
 class Agent:
-    motorThreshold = 20                     # Threshold for overlap for recognized motor output in motorStore.
-    goalThreshold = 20
-    motorSDRsize = 30                       # Size of SDRs stored in motorStore
+    goalThreshold = 30
+    motorSDRsize = 40                       # Size of SDRs stored in choosing winning motor action SDR.
     goalSDRsize = 30
     maxTimeBetGoal = 25                     # The maximum time allowed between goal states, more than this we add one
 
@@ -152,7 +152,6 @@ class Agent:
         # Set up buffer list
         self.senseBuffer = []                         # Buffer of past input sense data state SDRs.
         self.motorBuffer = []                         # Stores a tuple of MP input and winning motor output SDR.
-        self.motorStore = []                          # Stores winning SDRs used to produce motor output.
         self.goalStore = []                           # Stores tuple of all recognized goal state SDRs, and integer for count, and time last seen.
 
         # Set up encoders
@@ -224,7 +223,7 @@ class Agent:
     # Encodes sense data as an SDR and returns it.
 
         # Now we call the encoders to create bit representations for each value, and encode them.
-        paddleBits  = self.paddleEncoder.encode( yPos )
+        paddleBits   = self.paddleEncoder.encode( yPos )
         ballBitsX    = self.ballEncoderX.encode( ballX )
         ballBitsY    = self.ballEncoderY.encode( ballY )
         ballBitsVelX = self.ballEncoderVelX.encode( ballXSpeed )
@@ -244,9 +243,8 @@ class Agent:
         overlap = 0
 
         for cell1 in SDR1.sparse:
-            for cell2 in SDR2.sparse:
-                if cell1 == cell2:
-                    overlap += 1
+            if cell1 in SDR2.sparse:
+                overlap += 1
 
         return overlap
 
@@ -254,16 +252,20 @@ class Agent:
     # Finds SDR in listSDR with greatest overlap with testSDR and returns it, and its index in the list.
     # If none are found above threshold or if list is empty it returns an empty SDR of length testSDR.
 
-        aboveThreshold = []
-        if listSDR:
-            for idx, checkSDR in enumerate( listSDR ):
-                thisOverlap = self.Overlap( testSDR, checkSDR )
-                if thisOverlap >= threshold:
-                    aboveThreshold.insert( 0, [ thisOverlap, [checkSDR, idx] ] )
-        if aboveThreshold:
-            greatest = sorted( aboveThreshold, key=lambda tup: tup[0], reverse=True )[ 0 ][ 1 ]
-        else:
-            greatest = [ SDR( testSDR.size ), -1 ]
+        greatest = [ SDR( testSDR.size ), -1 ]
+
+        if len(listSDR) > 0:
+            # The first element of listSDR should always be a union of all the other SDRs in list,
+            # so a check can be performed first.
+            if self.Overlap( testSDR, listSDR[0] ) >= threshold:
+                aboveThreshold = []
+                for idx, checkSDR in enumerate( listSDR ):
+                    if idx != 0:
+                        thisOverlap = self.Overlap( testSDR, checkSDR )
+                        if thisOverlap >= threshold:
+                            aboveThreshold.append( [ thisOverlap, [checkSDR, idx] ] )
+                if len( aboveThreshold ) > 0:
+                    greatest = sorted( aboveThreshold, key=lambda tup: tup[0], reverse=True )[ 0 ][ 1 ]
 
         return greatest
 
@@ -271,30 +273,44 @@ class Agent:
     # Triggered when ball hits a paddle, trains the prediction network, PN
 
         # Go through sense data buffer (from oldest to newest) and compare each state to the goal SDR storage.
-        # If any are found store, in order, any found goal SDR states. Also, if it's been a while since we
-        # saw a goal state, add a new one to goal state storages. Also add occurrence integer to each found goal
+        # If any are found store, in order, any found goal SDR states. Also add occurrence integer to each found goal
         # state, and reset their time since last seen to 1.
+        # Also, if it's been a while since we saw a goal state, add a new one to goal state storages, and union
+        # with first element in goalStore list.
         foundGoals = []
         timeBetGoal = 0
         for indx, senseSDR in enumerate( self.senseBuffer ):
-            timeBetGoal += 1
-            if self.goalStore:
+            if indx != len( self.senseBuffer ) - 1:
+                timeBetGoal += 1
+                if len( self.goalStore ) > 1:
+                    testSDR = self.GreatestOverlap( senseSDR, [ i[0] for i in self.goalStore ], self.goalThreshold )
+                    if testSDR[1] != -1:
+                        foundGoals.append( testSDR[0] )
+                        self.goalStore[ testSDR[1] ][1] += 1
+                        self.goalStore[ testSDR[1] ][2] = 0
+                        timeBetGoal = 0
+                if timeBetGoal > self.maxTimeBetGoal:
+                    x = random.randint( 0, 100 )
+                    y = numpy.power( ( x * numpy.cbrt( self.maxTimeBetGoal / 2 ) / 50 ) - numpy.cbrt( self.maxTimeBetGoal / 2 ), 3 ) + ( self.maxTimeBetGoal / 2 )
+                    insStep = int( numpy.rint( y ) )
+                    if len( self.goalStore ) == 0:
+                        self.goalStore.append( [ SDR( senseSDR.size ), 0, 0 ] )
+                    self.goalStore.append( [ self.senseBuffer[ indx - insStep ], 1, 1 ] )
+                    self.goalStore[0][0].sparse = numpy.union1d( self.goalStore[0][0].sparse, self.senseBuffer[ indx - insStep ].sparse )
+                    foundGoals.append( self.senseBuffer[ indx - insStep ] )
+
+                    timeBetGoal = insStep
+            else:
+                # Add last senseData state to foundGoals at the end. This is the ball hitting paddle event.
                 testSDR = self.GreatestOverlap( senseSDR, [ i[0] for i in self.goalStore ], self.goalThreshold )
                 if testSDR[1] != -1:
                     foundGoals.append( testSDR[0] )
                     self.goalStore[ testSDR[1] ][1] += 1
-                    self.goalStore[ testSDR[1] ][2] += 1
-                    timeBetGoal = 0
-            if timeBetGoal > self.maxTimeBetGoal:
-                x = random.randint( 0, 100 )
-                y = numpy.power( ( x * numpy.cbrt( self.maxTimeBetGoal / 2 ) / 50 ) - numpy.cbrt( self.maxTimeBetGoal / 2 ), 3 ) + ( self.maxTimeBetGoal / 2 )
-                insStep = int( numpy.rint( y ) )
-                foundGoals.append( self.senseBuffer[ indx - insStep ] )
-                self.goalStore.append( [ self.senseBuffer[ indx - insStep ], 1, 1 ] )
-                timeBetGoal = insStep
-
-        # Add last senseData state to foundGoals at the end. This is the ball hitting paddle event.
-        foundGoals.append( self.senseBuffer[ -1 ] )
+                    self.goalStore[ testSDR[1] ][2] = 0
+                else:
+                    self.goalStore.append( [ self.senseBuffer[ indx ], 1, 1 ] )
+                    self.goalStore[0][0].sparse = numpy.union1d( self.goalStore[0][0].sparse, self.senseBuffer[ indx ].sparse )
+                    foundGoals.append( self.senseBuffer[ indx ] )
 
         # Train PM by:
         # Starting with the oldest entry of sense data buffer, choose one.
@@ -306,7 +322,6 @@ class Agent:
 
             # Feed in chosen entry to TP, with learning.
             self.tp.compute( senseDataSDR, True )
-#            self.tp.activateDendrites( learn=True )                    DO I NEED TO RUN THIS?
 
             # Check the chosen entry SDR if it is next goal state found above.
             # If chosen entry is next found goal state feed subsequent found goal state into TP, with learning.
@@ -317,9 +332,15 @@ class Agent:
 
             # Repeat for all steps of buffer.
 
-        # Goal state storage cleanup: Go through goal state storage and choose any goal states that haven’t
-        # been seen in 50+ turns, of these delete the 25% with the lowest event count.
-# DO THIS LATER
+        # Goal state storage cleanup:
+        # Add one to each time since seen.
+        # Go through goal state storage and choose any goal states that haven’t been seen in 20+ turns,
+        # of these delete the 25% with the lowest event count.
+#        for goalStateSDR in self.goalStore:
+#            if goalStateSDR != self.goalStore[0]:
+#                goalStateSDR[2] += 1
+#                if goalStateSDR[2] >= 20:
+# DO THIS LATER, DONT FORGET TO SKIP FIRST ELEMENT WHICH IS UNION.
 
         # Clear sense data buffer.
         self.senseBuffer.clear()
@@ -340,9 +361,6 @@ class Agent:
             # Feed MP the chosen entry winning goal SDR, with learning.
             self.mp.compute( motorSDR[ 1 ], True )
 
-            # Add winning motor action into motorStore.
-            self.motorStore.append( motorSDR[1] )
-
             # Repeat above for all steps of buffer.
 
         # Clear motor buffer.
@@ -355,10 +373,6 @@ class Agent:
         # If any above threshold choose the one with highest overlap, run habitual network reward event.
         reachedGoal = self.GreatestOverlap( senseSDR, [ i[0] for i in self.goalStore ], self.goalThreshold )
         if reachedGoal[1] != -1:
-            print (self.ID)
-            print (len(self.motorBuffer))
-            print (len(self.motorStore))
-            print (len(self.goalStore))
             self.HabitualNetRewardEvent( reachedGoal )
 
         # Reset PN.
@@ -385,10 +399,14 @@ class Agent:
         # Store sense data SDR into sense data buffer.
         self.senseBuffer.append( senseSDR )
 
+        predTime = time.time()
         # Run prediction network, sending it sense data SDR.
         goalSDR = self.PredictionNetwork( senseSDR )
+        print ("Prediction Time:", time.time() - predTime)
 
         #------------- Habitual network: -------------
+
+        habTime = time.time()
 
         # Reset MP.
         self.mp.reset()
@@ -400,20 +418,18 @@ class Agent:
         self.mp.activateDendrites( learn=False )
         predCellsMP = self.mp.getPredictiveCells()
 
-        # Compare predicted cells for overlap against motor output storage against some threshold,
-        # to produce winning SDR. If storage is empty, or not enough overlap threshold then
-        # winning SDR = x-number of random predicted cells (where x is a predetermined
-        # size of memory storage items).
-        aboveThreshold = self.GreatestOverlap( predCellsMP, self.motorStore , self.motorThreshold )
+        # Choose some random cells from predCellsMP as winning motor SDR.
         winningSDR = SDR( predCellsMP.size )
-        if aboveThreshold[1] != -1:
-# DOES THIS GET US THE BIGGEST? DOES IT WORK THE WAY IT SHOULD?
-            winningSDR = aboveThreshold[0]
+        if predCellsMP.sparse.size >= self.motorSDRsize:
+            winningSDR.sparse = numpy.random.choice( predCellsMP.sparse, self.motorSDRsize, replace=False )
         else:
-            if predCellsMP.sparse.size >= self.motorSDRsize:
-                winningSDR.sparse = sorted( numpy.random.choice( predCellsMP.sparse, self.motorSDRsize, replace=False ), reverse=False )
-            else:
-                winningSDR.sparse = random.sample( range( 0, predCellsMP.size ), self.motorSDRsize )
+            appendArray = numpy.zeros( self.motorSDRsize - predCellsMP.sparse.size, dtype=numpy.uint32 )
+            for i in range( self.motorSDRsize - predCellsMP.sparse.size ):
+                while True:
+                    appendArray[i] = random.randint( 0, predCellsMP.size - 1 )
+                    if appendArray[i] not in predCellsMP.sparse and appendArray[i] not in [ appendArray[ii] for ii in range(i) ]:
+                        break
+            winningSDR.sparse = numpy.append( predCellsMP.sparse, appendArray )
 
         # Add MP input SDR and winning SDR as single entry to motor buffer.
         self.motorBuffer.append( [ concateSDR, winningSDR ] )
@@ -427,6 +443,9 @@ class Agent:
             if sorted( motorScore, reverse=True )[ 0 ] == motorScore[ i ]:
                 largest.append( i + 1 )                                         # 1 = UP, 2 = STILL, 3 = DOWN
         winningMotor = random.choice( largest )
+
+        print ("Habitual Time:", time.time() - habTime)
+
 
         # Return winning motor function.
         return winningMotor

@@ -1,9 +1,2 @@
-newObject = 'Sam'
-print(newObject)
-newList = []
-newList.append(newObject)
-print(newList)
-newObject = 'George'
-print(newObject)
-newList.append(newObject)
-print(newList)
+import multiprocessing as mp
+print("Number of processors: ", mp.cpu_count())
