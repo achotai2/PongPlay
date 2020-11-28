@@ -130,12 +130,11 @@ class CyclicNet:
         self.synInactiveDec = synInactiveDec
         self.synActiveInc   = synActiveInc
 
-        self.activeCells = numpy.zeros( numColumns, dtype=numpy.float32 )
         self.synapse     = numpy.random.uniform( low=-0.05, high=0.05, size=( inputDim * numColumns, ) )
 
 class Agent:
 
-    placeCellThresholdLow = 30
+    placeCellThresholdLow = 15
     placeCellThresholdHigh = 30
 
     # Set up encoder parameters
@@ -186,7 +185,7 @@ class Agent:
             wrapAround                 = True
         )
 
-        self.cycNetwork = CyclicNet( self.sp.getColumnDimensions( )[ 0 ] * 3, 100, 15, 0.05, 0.1 )
+        self.cycNetwork = CyclicNet( self.sp.getColumnDimensions( )[ 0 ] * 3, 100, 5, 0.05, 0.1 )
 
     def EncodeSenseData( self, agentX, agentY ):
     # Encodes sense data as an SDR and returns it.
@@ -239,61 +238,48 @@ class Agent:
 
         # Find the top active columns, numbering maxActive, and feed the activation into these.
         maxActiveColumns = numpy.absolute( columnActivation ).argsort( )[ -self.cycNetwork.maxActive: ][ ::-1 ]
+        transformActive = numpy.zeros( self.cycNetwork.numColumns, dtype=numpy.float32 )
         for act in maxActiveColumns:
-            self.cycNetwork.activeCells[ act ] += columnActivation[ act ]
+            transformActive[ act ] = columnActivation[ act ]
 
+        # If this is the first time seeing this location, store vector for this place by adding transformation
+        # activation to lastPlace vector.
+        summedVector = numpy.add( transformActive, self.placeCellVect[ lastPlace ] )
         if firstRun:
-            self.placeCellVect[ thisPlace ] = numpy.copy( self.cycNetwork.activeCells )
+            self.placeCellVect[ thisPlace ] = summedVector
 
-        # Perform learning on synapses.
+        # Perform learning on synapses by testing vector space arithmetic.
         if learn:
-            inIt = True
-            switcher = 1
             for col in range( self.cycNetwork.numColumns ):
-                synInc = self.cycNetwork.synActiveInc
-                synDec = self.cycNetwork.synInactiveDec
 
-                # Move stored vector closer to found vector.
-                if not firstRun:
-                    if self.cycNetwork.placeCellVect[ thisPlace ][ col ] < self.cycNetwork.activeCells[ col ]
+                if summedVector[ col ] >= self.placeCellVect[ thisPlace ][ col ]:
+                    # Adjust lastPlace vector and thisPlace vector to reduce error in summedVector.
+                    if thisPlace != 1:          # Don't alter the vector for den element, it is the origin.
+                        self.placeCellVect[ thisPlace ][ col ] += self.cycNetwork.synActiveInc
+                    if lastPlace != 1:
+                        self.placeCellVect[ lastPlace ][ col ] -= self.cycNetwork.synActiveInc
 
-                if col in maxActiveColumns:
-                    inIt = True
+                    # Adjust synapse connections (which produces transformation vector) to reduce error in summedVector.
+                    for intersectCell in intersectSDR.sparse:
+                        self.cycNetwork.synapse[ ( intersectCell * self.cycNetwork.numColumns ) + col ] -= self.cycNetwork.synInactiveDec
+                    for offCell in intersectSDR.sparse:
+                        self.cycNetwork.synapse[ ( ( SDRsize + offCell ) * self.cycNetwork.numColumns ) + col ] -= self.cycNetwork.synInactiveDec
+                    for onCell in intersectSDR.sparse:
+                        self.cycNetwork.synapse[ ( ( ( SDRsize * 2 ) + onCell ) * self.cycNetwork.numColumns ) + col ] -= self.cycNetwork.synInactiveDec
                 else:
-                    inIt = False
-                for intersectCell in intersectSDR.sparse:
-                    # Increase permanance on active cells.
-                    if self.cycNetwork.synapse[ ( intersectCell * self.cycNetwork.numColumns ) + col ] >= 0:
-                        switcher = 1
-                    else:
-                        switcher = -1
-                    if inIt:
-                        self.cycNetwork.synapse[ ( intersectCell * self.cycNetwork.numColumns ) + col ] += synInc * switcher
-                    # Decrease permanance on inactive cells.
-                    else:
-                        self.cycNetwork.synapse[ ( intersectCell * self.cycNetwork.numColumns ) + col ] -= synDec * switcher
-                for offCell in intersectSDR.sparse:
-                    # Increase permanance on active cells.
-                    if self.cycNetwork.synapse[ ( ( SDRsize + offCell ) * self.cycNetwork.numColumns ) + col ] >= 0:
-                        switcher = 1
-                    else:
-                        switcher = -1
-                    if inIt:
-                        self.cycNetwork.synapse[ ( ( SDRsize + offCell ) * self.cycNetwork.numColumns ) + col ] += synInc
-                    # Decrease permanance on inactive cells.
-                    else:
-                        self.cycNetwork.synapse[ ( ( SDRsize + offCell ) * self.cycNetwork.numColumns ) + col ] -= synDec
-                for onCell in intersectSDR.sparse:
-                    # Increase permanance on active cells.
-                    if self.cycNetwork.synapse[ ( ( ( SDRsize * 2 ) + onCell ) * self.cycNetwork.numColumns ) + col ] >= 0:
-                        switcher = 1
-                    else:
-                        switcher = -1
-                    if inIt:
-                        self.cycNetwork.synapse[ ( ( ( SDRsize * 2 ) + onCell ) * self.cycNetwork.numColumns ) + col ] += synInc
-                    # Decrease permanance on inactive cells.
-                    else:
-                        self.cycNetwork.synapse[ ( ( ( SDRsize * 2 ) + onCell ) * self.cycNetwork.numColumns ) + col ] -= synDec
+                    # Adjust lastPlace vector and thisPlace vector to reduce error in summedVector.
+                    if thisPlace != 1:
+                        self.placeCellVect[ thisPlace ][ col ] -= self.cycNetwork.synActiveInc
+                    if thisPlace != 1:
+                        self.placeCellVect[ lastPlace ][ col ] += self.cycNetwork.synActiveInc
+
+                    # Adjust synapse connections (which produces transformation vector) to reduce error in summedVector.
+                    for intersectCell in intersectSDR.sparse:
+                        self.cycNetwork.synapse[ ( intersectCell * self.cycNetwork.numColumns ) + col ] += self.cycNetwork.synInactiveDec
+                    for offCell in intersectSDR.sparse:
+                        self.cycNetwork.synapse[ ( ( SDRsize + offCell ) * self.cycNetwork.numColumns ) + col ] += self.cycNetwork.synInactiveDec
+                    for onCell in intersectSDR.sparse:
+                        self.cycNetwork.synapse[ ( ( ( SDRsize * 2 ) + onCell ) * self.cycNetwork.numColumns ) + col ] += self.cycNetwork.synInactiveDec
 
 # Keyboard bindings
 wn.listen( )
@@ -321,20 +307,31 @@ while True:
     # Encode sense data.
     senseSDR = agentClass.EncodeSenseData( agentDraw.xcor( ), agentDraw.ycor( ) )
 
-    # Randomly choose motor output
-    motorOutput = random.randint( 0, 3 )
-    if motorOutput == 0:
-        agent_up( )
-    elif motorOutput == 1:
-        agent_down( )
-    elif motorOutput == 2:
-        agent_left( )
-    elif motorOutput == 3:
-        agent_right( )
-
     # Check senseSDR against stored place cells.
     if not agentClass.firstRun:
         greatestOverlap = GreatestOverlap( senseSDR, agentClass.placeCells, agentClass.placeCellThresholdLow )
+
+        # Set up origin point as den, and make sure the agent always know it is at the den.
+        if agentDraw.xcor() == 0 and agentDraw.ycor() == 0:
+            # Add in den place cell.
+            if len( agentClass.placeCells ) == 0:
+                agentClass.placeCells.append( SDR( senseSDR.size ) )           # Union element.
+                agentClass.placeCellVect.append( numpy.zeros( agentClass.cycNetwork.numColumns, dtype=numpy.float32 ) )
+                agentClass.placeCells.append( senseSDR )                       # Den element
+                agentClass.placeCellVect.append( numpy.zeros( agentClass.cycNetwork.numColumns, dtype=numpy.float32 ) )
+                agentClass.placeCells[0].sparse = numpy.union1d( agentClass.placeCells[ 0 ].sparse, senseSDR.sparse )
+
+            if greatestOverlap[ 1 ] != 1:
+                # Delete place cell mistakingly identified as den.
+                if greatestOverlap [ 1 ] != -1:
+                    if agentClass.lastPlaceCell > greatestOverlap[ 1 ]:
+                        agentClass.lastPlaceCell -= 1
+                    elif agentClass.lastPlaceCell == greatestOverlap[ 1 ]:
+                        agentClass.lastPlaceCell = 1
+                    agentClass.placeCells.pop( greatestOverlap[ 1 ] )
+                greatestOverlap[ 1 ] = 1
+                greatestOverlap[ 0 ] = agentClass.placeCellThresholdHigh
+
         if greatestOverlap[ 1 ] == -1:
             # If it is lower than placeCellThresholdLow insert and draw a new place cell.
             placeDraw = turtle.Turtle( )
@@ -348,9 +345,6 @@ while True:
             currPlaceDraw.sety( agentDraw.ycor( ) )
 
             # Add new place cell and union with first element.
-            if len( agentClass.placeCells ) == 0:
-                agentClass.placeCells.append( SDR( senseSDR.size ) )
-                agentClass.placeCellVect.append( numpy.zeros( agentClass.cycNetwork.numColumns, dtype=numpy.float32 ) )
             agentClass.placeCells.append( senseSDR )
             agentClass.placeCellVect.append( numpy.zeros( agentClass.cycNetwork.numColumns, dtype=numpy.float32 ) )
             agentClass.placeCells[0].sparse = numpy.union1d( agentClass.placeCells[ 0 ].sparse, senseSDR.sparse )
@@ -368,3 +362,16 @@ while True:
             if agentClass.lastPlaceCell != -1:
                 agentClass.ActivateColumns( greatestOverlap[ 1 ], agentClass.lastPlaceCell, True, False )
             agentClass.lastPlaceCell = greatestOverlap[ 1 ]
+
+            print ( agentClass.placeCellVect[ greatestOverlap[ 1 ] ])
+
+    # Randomly choose motor output
+    motorOutput = random.randint( 0, 3 )
+    if motorOutput == 0:
+        agent_up( )
+    elif motorOutput == 1:
+        agent_down( )
+    if motorOutput == 0 or 2:
+        agent_left( )
+    elif motorOutput == 1 or 3:
+        agent_right( )
