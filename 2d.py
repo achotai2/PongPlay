@@ -17,61 +17,61 @@ screenHeight = 600          # Used in setting up screen and encoders
 screenWidth = 800
 
 # Set up turtle screen.
-wn = turtle.Screen()
-wn.title("2D")
-wn.bgcolor("black")
-wn.setup(width=screenWidth, height=screenHeight)
-wn.tracer(0)
+wn = turtle.Screen( )
+wn.title( "2D" )
+wn.bgcolor( "black" )
+wn.setup( width=screenWidth, height=screenHeight )
+wn.tracer( 0 )
 
 # Set up agent.
-agentDraw = turtle.Turtle()
-agentDraw.speed(0)
-agentDraw.shape("square")
-agentDraw.color("white")
-agentDraw.shapesize(stretch_wid=2,stretch_len=2)
-agentDraw.penup()
+agentDraw = turtle.Turtle( )
+agentDraw.speed( 0 )
+agentDraw.shape( "square" )
+agentDraw.color( "white" )
+agentDraw.shapesize( stretch_wid=2, stretch_len=2 )
+agentDraw.penup( )
 agentDraw.goto( 0, 0 )
 
 # Set up place cell stuff.
 placeCellsDraw = []
-currPlaceDraw = turtle.Turtle()
-currPlaceDraw.speed(0)
-currPlaceDraw.shape("circle")
-currPlaceDraw.color("red")
-currPlaceDraw.shapesize(stretch_wid=0.5,stretch_len=0.5)
-currPlaceDraw.penup()
+currPlaceDraw = turtle.Turtle( )
+currPlaceDraw.speed( 0 )
+currPlaceDraw.shape( "circle" )
+currPlaceDraw.color( "red" )
+currPlaceDraw.shapesize( stretch_wid=0.5, stretch_len=0.5 )
+currPlaceDraw.penup( )
 currPlaceDraw.goto( 0, 0 )
 
 # Set up den.
-denDraw = turtle.Turtle()
-denDraw.speed(0)
-denDraw.shape("square")
-denDraw.color("blue")
-denDraw.shapesize(stretch_wid=2,stretch_len=2)
-denDraw.penup()
+denDraw = turtle.Turtle( )
+denDraw.speed( 0 )
+denDraw.shape( "square" )
+denDraw.color( "blue" )
+denDraw.shapesize( stretch_wid=2, stretch_len=2 )
+denDraw.penup( )
 denDraw.goto( 0, 0 )
 
 # Functions
-def agent_up():
-    y = agentDraw.ycor()
+def agent_up( ):
+    y = agentDraw.ycor( )
     if y < 290 - 20:
         y += 20
         agentDraw.sety(y)
 
-def agent_down():
-    y = agentDraw.ycor()
+def agent_down( ):
+    y = agentDraw.ycor( )
     if y > -290 + 20:
         y -= 20
         agentDraw.sety(y)
 
-def agent_right():
-    x = agentDraw.xcor()
+def agent_right( ):
+    x = agentDraw.xcor( )
     if x < 390 - 20:
         x += 20
         agentDraw.setx(x)
 
-def agent_left():
-    x = agentDraw.xcor()
+def agent_left( ):
+    x = agentDraw.xcor( )
     if x > -390 + 20:
         x -= 20
         agentDraw.setx(x)
@@ -133,45 +133,14 @@ class CyclicNet:
         self.activeCells = numpy.zeros( numColumns, dtype=numpy.float32 )
         self.synapse     = numpy.random.uniform( low=-0.05, high=0.05, size=( inputDim * numColumns, ) )
 
-    def ActivateColumns( self, thisPlaceSDR, lastPlaceSDR, learn ):
-    # Use the inputSDR to activate cells, ticking over to next cell in active column.
-    # Only activate number of cells equal to maxActive.
-
-# CHANGES:
-#   - Need to give it the last place cell agent was at and the current one, and encode the 'transition' SDR.
-#   - Need to make synapses excibitory or inhibatory (meaning cycle in other direction). Perhaps take away
-#       the cyclic nature and just make the cells different levels of excitation.
-# It should work. If you imagine this taken to the extreme of learning for two place cells then you could have one
-# column representing distance along x-axis and another y-axis, and transformation between SDRs would map to
-# corresponding excitation or inhibition of these columns to make the displacement vectors work.
-
-        # Form transition SDR by taking the intersection of the passed place cells, ie. symmetries.
-        transitionSDR = SDR ( thisPlaceSDR.size )
-        transitionSDR.sparse = numpy.intersect1d( thisPlaceSDR.sparse, lastPlaceSDR.sparse )
-
-        # Feed forward inputSDR along synapses to get column activation.
-        columnActivation = numpy.zeros( self.numColumns, dtype=numpy.float32 )
-        for inputCell in transitionSDR.sparse:
-            for col in range( self.numColumns ):
-                columnActivation[ col ] += self.synapse[ ( inputCell * self.numColumns ) + col ]
-
-        # Find the top active columns, numbering maxActive, and feed the activation into these.
-        maxActiveColumns = numpy.absolute( columnActivation ).argsort()[ -self.maxActive: ][ ::-1 ]
-        for i in maxActiveColumns:
-            print( i, columnActivation[i] )
-        for act in maxActiveColumns:
-            self.activeCells[ act ] += columnActivation[ act ]
-
-        # 
-
 class Agent:
 
-    placeCellThresholdLow = 20
-    placeCellThresholdHigh = 35
+    placeCellThresholdLow = 30
+    placeCellThresholdHigh = 30
 
     # Set up encoder parameters
-    agentXEncodeParams = ScalarEncoderParameters()
-    agentYEncodeParams = ScalarEncoderParameters()
+    agentXEncodeParams = ScalarEncoderParameters( )
+    agentYEncodeParams = ScalarEncoderParameters( )
 
     agentXEncodeParams.activeBits = 51
     agentXEncodeParams.radius     = 50
@@ -192,6 +161,7 @@ class Agent:
         self.firstRun = True
         self.timeStep = 0
         self.placeCells = []
+        self.placeCellVect = []
         self.lastPlaceCell = -1
 
         # Set up encoders
@@ -216,7 +186,7 @@ class Agent:
             wrapAround                 = True
         )
 
-        self.cycNetwork = CyclicNet( self.sp.getColumnDimensions()[ 0 ], 2048, 10, 0.05, 0.1 )
+        self.cycNetwork = CyclicNet( self.sp.getColumnDimensions( )[ 0 ] * 3, 100, 15, 0.05, 0.1 )
 
     def EncodeSenseData( self, agentX, agentY ):
     # Encodes sense data as an SDR and returns it.
@@ -227,76 +197,174 @@ class Agent:
 
         # Concatenate all these encodings into one large encoding for Spatial Pooling.
         encoding = SDR( self.encodingWidth ).concatenate( [ agentBitsX, agentBitsY ] )
-        senseSDR = SDR( self.sp.getColumnDimensions() )
+        senseSDR = SDR( self.sp.getColumnDimensions( ) )
         self.sp.compute( encoding, True, senseSDR )
 
         return senseSDR
 
+    def ActivateColumns( self, thisPlace, lastPlace, learn, firstRun ):
+    # Use the inputSDR to activate cells, ticking over to next cell in active column.
+    # Only activate number of cells equal to maxActive.
+
+    # REQUIRED CHANGES:
+    #   - Need to speed it up, it runs slow right now.
+    #   - Each place cell stores a vector, and whenever you arrive at that vector the synapses of the vector
+    #       move a bit in the direction of the arrived vector, and the synapses of the arrived vector move
+    #       a bit in the direction of the place cell vector.
+    # It should work. If you imagine this taken to the extreme of learning for two place cells then you could have
+    # one column representing distance along x-axis and another y-axis, and transformation between SDRs would map
+    # to corresponding excitation or inhibition of these columns to make the displacement vectors work.
+
+        SDRsize = self.sp.getColumnDimensions( )[ 0 ]
+
+        # Form transition SDRs by taking the intersection of the passed place cells, ie. symmetries.
+        intersectSDR = SDR ( SDRsize )
+        intersectSDR.sparse = numpy.intersect1d( self.placeCells[ thisPlace ].sparse, self.placeCells[ lastPlace ].sparse )
+        # Those cells that turned off in transition.
+        turnOffSDR = SDR ( SDRsize )
+        turnOffSDR.sparse = numpy.setdiff1d( self.placeCells[ lastPlace ].sparse, intersectSDR.sparse )
+        # Those cells that turned on in transition.
+        turnOnSDR = SDR ( SDRsize )
+        turnOnSDR.sparse = numpy.setdiff1d( self.placeCells[ thisPlace ].sparse, intersectSDR.sparse )
+
+        # Feed forward inputSDR along synapses to get column activation.
+        columnActivation = numpy.zeros( self.cycNetwork.numColumns, dtype=numpy.float32 )
+        for col in range( self.cycNetwork.numColumns ):
+            for intersectCell in intersectSDR.sparse:
+                columnActivation[ col ] += self.cycNetwork.synapse[ ( intersectCell * self.cycNetwork.numColumns ) + col ]
+            for offCell in turnOffSDR.sparse:
+                columnActivation[ col ] += self.cycNetwork.synapse[ ( ( SDRsize + offCell ) * self.cycNetwork.numColumns ) + col ]
+            for onCell in turnOnSDR.sparse:
+                columnActivation[ col ] += self.cycNetwork.synapse[ ( ( ( SDRsize * 2 ) + onCell ) * self.cycNetwork.numColumns ) + col ]
+
+        # Find the top active columns, numbering maxActive, and feed the activation into these.
+        maxActiveColumns = numpy.absolute( columnActivation ).argsort( )[ -self.cycNetwork.maxActive: ][ ::-1 ]
+        for act in maxActiveColumns:
+            self.cycNetwork.activeCells[ act ] += columnActivation[ act ]
+
+        if firstRun:
+            self.placeCellVect[ thisPlace ] = numpy.copy( self.cycNetwork.activeCells )
+
+        # Perform learning on synapses.
+        if learn:
+            inIt = True
+            switcher = 1
+            for col in range( self.cycNetwork.numColumns ):
+                synInc = self.cycNetwork.synActiveInc
+                synDec = self.cycNetwork.synInactiveDec
+
+                # Move stored vector closer to found vector.
+                if not firstRun:
+                    if self.cycNetwork.placeCellVect[ thisPlace ][ col ] < self.cycNetwork.activeCells[ col ]
+
+                if col in maxActiveColumns:
+                    inIt = True
+                else:
+                    inIt = False
+                for intersectCell in intersectSDR.sparse:
+                    # Increase permanance on active cells.
+                    if self.cycNetwork.synapse[ ( intersectCell * self.cycNetwork.numColumns ) + col ] >= 0:
+                        switcher = 1
+                    else:
+                        switcher = -1
+                    if inIt:
+                        self.cycNetwork.synapse[ ( intersectCell * self.cycNetwork.numColumns ) + col ] += synInc * switcher
+                    # Decrease permanance on inactive cells.
+                    else:
+                        self.cycNetwork.synapse[ ( intersectCell * self.cycNetwork.numColumns ) + col ] -= synDec * switcher
+                for offCell in intersectSDR.sparse:
+                    # Increase permanance on active cells.
+                    if self.cycNetwork.synapse[ ( ( SDRsize + offCell ) * self.cycNetwork.numColumns ) + col ] >= 0:
+                        switcher = 1
+                    else:
+                        switcher = -1
+                    if inIt:
+                        self.cycNetwork.synapse[ ( ( SDRsize + offCell ) * self.cycNetwork.numColumns ) + col ] += synInc
+                    # Decrease permanance on inactive cells.
+                    else:
+                        self.cycNetwork.synapse[ ( ( SDRsize + offCell ) * self.cycNetwork.numColumns ) + col ] -= synDec
+                for onCell in intersectSDR.sparse:
+                    # Increase permanance on active cells.
+                    if self.cycNetwork.synapse[ ( ( ( SDRsize * 2 ) + onCell ) * self.cycNetwork.numColumns ) + col ] >= 0:
+                        switcher = 1
+                    else:
+                        switcher = -1
+                    if inIt:
+                        self.cycNetwork.synapse[ ( ( ( SDRsize * 2 ) + onCell ) * self.cycNetwork.numColumns ) + col ] += synInc
+                    # Decrease permanance on inactive cells.
+                    else:
+                        self.cycNetwork.synapse[ ( ( ( SDRsize * 2 ) + onCell ) * self.cycNetwork.numColumns ) + col ] -= synDec
+
 # Keyboard bindings
-wn.listen()
+wn.listen( )
 wn.onkey(agent_up, "w")
 wn.onkey(agent_down, "s")
 wn.onkey(agent_left, "a")
 wn.onkey(agent_right, "d")
 
-agentClass = Agent()
+agentClass = Agent( )
 
 while True:
 # Main game loop
 
-    wn.update()         # Screen update
+    wn.update( )         # Screen update
 
     agentClass.timeStep += 1
 
     if agentClass.timeStep >= 50:
         agentClass.timeStep = 0
         agentClass.firstRun = False
+        agentClass.cycNetwork.activeCells = numpy.zeros( agentClass.cycNetwork.numColumns, dtype=numpy.float32 )
         agentDraw.setx( 0 )
         agentDraw.sety( 0 )
 
     # Encode sense data.
-    senseSDR = agentClass.EncodeSenseData( agentDraw.xcor(), agentDraw.ycor() )
+    senseSDR = agentClass.EncodeSenseData( agentDraw.xcor( ), agentDraw.ycor( ) )
 
     # Randomly choose motor output
     motorOutput = random.randint( 0, 3 )
     if motorOutput == 0:
-        agent_up()
+        agent_up( )
     elif motorOutput == 1:
-        agent_down()
+        agent_down( )
     elif motorOutput == 2:
-        agent_left()
+        agent_left( )
     elif motorOutput == 3:
-        agent_right()
+        agent_right( )
 
     # Check senseSDR against stored place cells.
     if not agentClass.firstRun:
         greatestOverlap = GreatestOverlap( senseSDR, agentClass.placeCells, agentClass.placeCellThresholdLow )
         if greatestOverlap[ 1 ] == -1:
             # If it is lower than placeCellThresholdLow insert and draw a new place cell.
-            placeDraw = turtle.Turtle()
-            placeDraw.color("red")
-            placeDraw.penup()
-            placeDraw.setposition( agentDraw.xcor(), agentDraw.ycor() - 20 )
-            placeDraw.pendown()
-            placeDraw.circle(20)
+            placeDraw = turtle.Turtle( )
+            placeDraw.color( "red" )
+            placeDraw.penup( )
+            placeDraw.setposition( agentDraw.xcor( ), agentDraw.ycor( ) - 20 )
+            placeDraw.pendown( )
+            placeDraw.circle( 20 )
             placeCellsDraw.append( placeDraw )
-            currPlaceDraw.setx( agentDraw.xcor() )
-            currPlaceDraw.sety( agentDraw.ycor() )
+            currPlaceDraw.setx( agentDraw.xcor( ) )
+            currPlaceDraw.sety( agentDraw.ycor( ) )
 
+            # Add new place cell and union with first element.
             if len( agentClass.placeCells ) == 0:
                 agentClass.placeCells.append( SDR( senseSDR.size ) )
+                agentClass.placeCellVect.append( numpy.zeros( agentClass.cycNetwork.numColumns, dtype=numpy.float32 ) )
             agentClass.placeCells.append( senseSDR )
-            agentClass.placeCells[0].sparse = numpy.union1d( agentClass.placeCells[0].sparse, senseSDR.sparse )
+            agentClass.placeCellVect.append( numpy.zeros( agentClass.cycNetwork.numColumns, dtype=numpy.float32 ) )
+            agentClass.placeCells[0].sparse = numpy.union1d( agentClass.placeCells[ 0 ].sparse, senseSDR.sparse )
 
+            # Call ActivateColumns and update lastPlaceCell
             if agentClass.lastPlaceCell != -1:
-                agentClass.cycNetwork.ActivateColumns( senseSDR, agentClass.placeCells[ agentClass.lastPlaceCell ], True )
+                agentClass.ActivateColumns( -1, agentClass.lastPlaceCell, True, True )
             agentClass.lastPlaceCell = len( agentClass.placeCells ) - 1
 
         elif greatestOverlap[ 0 ] >= agentClass.placeCellThresholdHigh:
             # If it is higher than placeCellThresholdHigh then we are on a place cell.
-            currPlaceDraw.setx( placeCellsDraw[ greatestOverlap[ 1 ] - 1 ].xcor() )
-            currPlaceDraw.sety( placeCellsDraw[ greatestOverlap[ 1 ] - 1 ].ycor() )
+            currPlaceDraw.setx( placeCellsDraw[ greatestOverlap[ 1 ] - 1 ].xcor( ) )
+            currPlaceDraw.sety( placeCellsDraw[ greatestOverlap[ 1 ] - 1 ].ycor( ) )
 
             if agentClass.lastPlaceCell != -1:
-                agentClass.cycNetwork.ActivateColumns( agentClass.placeCells[ greatestOverlap[ 1 ] ], agentClass.placeCells[ agentClass.lastPlaceCell ], True )
+                agentClass.ActivateColumns( greatestOverlap[ 1 ], agentClass.lastPlaceCell, True, False )
             agentClass.lastPlaceCell = greatestOverlap[ 1 ]
