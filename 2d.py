@@ -3,6 +3,7 @@ import turtle
 import random
 import time
 import sys
+from math import sqrt
 
 from htm.bindings.sdr import SDR, Metrics
 from htm.encoders.rdse import RDSE, RDSE_Parameters
@@ -33,16 +34,6 @@ agentDraw.shapesize( stretch_wid=2, stretch_len=2 )
 agentDraw.penup( )
 agentDraw.goto( 0, 0 )
 
-# Set up place cell stuff.
-placeCellsDraw = []
-currPlaceDraw = turtle.Turtle( )
-currPlaceDraw.speed( 0 )
-currPlaceDraw.shape( "circle" )
-currPlaceDraw.color( "red" )
-currPlaceDraw.shapesize( stretch_wid=0.5, stretch_len=0.5 )
-currPlaceDraw.penup( )
-currPlaceDraw.goto( 0, 0 )
-
 # Set up den.
 denDraw = turtle.Turtle( )
 denDraw.speed( 0 )
@@ -52,8 +43,17 @@ denDraw.shapesize( stretch_wid=2, stretch_len=2 )
 denDraw.penup( )
 denDraw.goto( 0, 0 )
 
-# Test graph.
-
+# Set up place cell stuff.
+placeCellsDraw = []
+for i in range( -int( screenWidth / 40 ), int( screenWidth / 40 ) ):
+    currPlaceDraw = turtle.Turtle( )
+    currPlaceDraw.speed( 0 )
+    currPlaceDraw.shape( "circle" )
+    currPlaceDraw.color( "red" )
+    currPlaceDraw.shapesize( stretch_wid=0.5, stretch_len=0.5 )
+    currPlaceDraw.penup( )
+    currPlaceDraw.goto( i * 20, 0 )
+    placeCellsDraw.append( currPlaceDraw )
 
 # Functions
 def agent_up( ):
@@ -160,7 +160,7 @@ class VectorNet:
 
         return transformActive
 
-    def AdjustSynapse( self, colID, inputSDR, lessThan, elasticity ):
+    def AdjustSynapse( self, colID, inputSDR, lessThan ):
     # Adjust the active synapse connections to reduce error between actual vector and projected vector.
     # If lessThan is False then decrease active synapses connecting to that column, if True then increase them.
 
@@ -178,7 +178,7 @@ class VectorNet:
             flip = -1
 
         for cell in inputSDR.sparse:
-            self.synapse[ ( cell * self.numColumns ) + colID ] += inc * flip * ( 1 - numpy.exp( -elasticity / 100 ) )
+            self.synapse[ ( cell * self.numColumns ) + colID ] += inc * flip
 
 class Agent:
 
@@ -250,17 +250,20 @@ class Agent:
             seed                      = 42
         )
 
-        self.vectorNetwork = VectorNet( self.tp.getCellsPerColumn() * self.tp.getColumnDimensions()[ 0 ], 100, 5, 0.01, 0.05 )
+        self.vectorNetwork = VectorNet( self.tp.getCellsPerColumn() * self.tp.getColumnDimensions()[ 0 ], 1, 5, 0.01, 0.05 )
 
         self.lastSDR = SDR( self.sp.getColumnDimensions() )
-        self.activeVector = numpy.zeros( self.vectorNetwork.numColumns, dtype=numpy.float32 )
+#        self.activeVector = numpy.zeros( self.vectorNetwork.numColumns, dtype=numpy.float32 )
+        self.lastVect = numpy.zeros( self.vectorNetwork.numColumns, dtype=numpy.float32 )
 
-        self.spColumnElasticity = numpy.zeros( self.sp.getColumnDimensions()[ 0 ], dtype=numpy.float32 )
+#        self.spColumnElasticity = numpy.zeros( self.sp.getColumnDimensions()[ 0 ], dtype=numpy.float32 )
         self.spColumnConnects   = []
         for i in range( self.sp.getColumnDimensions()[ 0 ] ):
-            self.spColumnConnects.append( numpy.random.uniform( low=-0.05, high=0.05, size=( self.vectorNetwork.numColumns, ) ) )
+            self.spColumnConnects.append( numpy.random.uniform( low=-10, high=10, size=( self.vectorNetwork.numColumns, ) ) )
 
         self.motorDecoderSynapse = numpy.random.uniform( low=0.00, high=0.05, size=( self.vectorNetwork.numColumns * 2, ) )
+
+        self.memBuffer = []
 
     def EncodeSenseData( self, agentX, agentY ):
     # Encodes sense data as an SDR and returns it.
@@ -353,20 +356,20 @@ class Agent:
                         self.vectorNetwork.synapse[ ( ( ( self.vectorNetwork.inputSDRsize * 2 ) + onCell ) * self.vectorNetwork.numColumns ) + col ] += self.vectorNetwork.synInactiveDec
 
 # Keyboard bindings
-wn.listen( )
-wn.onkey(agent_up, "w")
-wn.onkey(agent_down, "s")
-wn.onkey(agent_left, "a")
-wn.onkey(agent_right, "d")
+wn.listen()
+wn.onkey( agent_up, "w" )
+wn.onkey( agent_down, "s" )
+wn.onkey( agent_left, "a" )
+wn.onkey( agent_right, "d" )
 
-agentClass = Agent( )
+agentClass = Agent()
 
 while True:
 # Main game loop
 
     wn.update( )         # Screen update
 
-#    agentClass.timeStep += 1
+    agentClass.timeStep += 1
 
     if agentClass.timeStep >= 50:
         print ("Go Home!-------------------------------------------------------------------------")
@@ -375,13 +378,32 @@ while True:
         agentClass.timeStep = 0
         agentClass.vectorNetwork.activeCells = numpy.zeros( agentClass.vectorNetwork.numColumns, dtype=numpy.float32 )
         agentClass.goalOrigin = False
+#        agentClass.memBuffer.clear()
 
     # Encode sense data.
     encoding = agentClass.EncodeSenseData( agentDraw.xcor(), agentDraw.ycor() )
 
     # Get place cell SDR through spatial pooler.
     senseSDR = SDR( agentClass.sp.getColumnDimensions() )
-    agentClass.sp.compute( encoding, True, senseSDR )
+    agentClass.sp.compute( encoding, False, senseSDR )
+
+    # Generate current place cell vector.
+    senseVector = numpy.zeros( agentClass.vectorNetwork.numColumns, dtype=numpy.float32 )
+    for col in range( agentClass.vectorNetwork.numColumns ):
+        columnValue = 0.0
+        for active in senseSDR.sparse:
+            columnValue += agentClass.spColumnConnects[ active ][ col ]
+        if agentDraw.xcor() != 0 or agentDraw.ycor() != 0:
+            senseVector[ col ] = columnValue
+    placeCellsDraw[ int( ( agentDraw.xcor() / 20 ) + ( screenWidth / 40 ) ) ].sety( senseVector[ 0 ] )
+    # If we are at origin then train vector to be zero.
+    if agentDraw.xcor() == 0 and agentDraw.ycor() == 0:
+        for active in senseSDR.sparse:
+            for col in range( agentClass.vectorNetwork.numColumns ):
+                if senseVector[ col ] > 0:
+                    agentClass.spColumnConnects[ active ][ col ] -= 0.001
+                elif senseVector[ col ] < 0:
+                    agentClass.spColumnConnects[ active ][ col ] += 0.001
 
     # Feed the last place SDR and then this one through the temporal predictor to get the vectorSDR.
     agentClass.tp.reset()
@@ -392,52 +414,99 @@ while True:
     # Get vector representation of transformation from transVectorSDR.
     transVectorRep = agentClass.vectorNetwork.ActivateColumns( transVectorSDR )
 
-    # Add transformation vector to active vector.
-    agentClass.activeVector = numpy.add( agentClass.activeVector, transVectorRep )
+#    # Add transformation vector to active vector.
+#    agentClass.activeVector = numpy.add( agentClass.activeVector, transVectorRep )
+
+    # Add transformation vector to old vector.
+    predVectorRep = numpy.add( agentClass.lastVect, transVectorRep )
 
     # Support elasticity of encountered cells based on what we last saw.
-    if agentDraw.xcor() == 0 and agentDraw.ycor() == 0:
-        for cell in senseSDR.sparse:
-            agentClass.spColumnElasticity[ cell ] += 1
-        agentClass.activeVector = numpy.zeros( agentClass.vectorNetwork.numColumns, dtype=numpy.float32 )
-    else:
-        sum = 0
-        for cell in agentClass.lastSDR.sparse:
-            sum += agentClass.spColumnElasticity[ cell ]
-        for cell in senseSDR.sparse:
-            agentClass.spColumnElasticity[ cell ] += 0.1 * ( 1 - numpy.exp( -sum / 100 ) )
+#    if agentDraw.xcor() == 0 and agentDraw.ycor() == 0:
+#        for cell in senseSDR.sparse:
+#            agentClass.spColumnElasticity[ cell ] += 1
+#        agentClass.activeVector = numpy.zeros( agentClass.vectorNetwork.numColumns, dtype=numpy.float32 )
+#    else:
+#        sum = 0
+#        for cell in agentClass.lastSDR.sparse:
+#            sum += agentClass.spColumnElasticity[ cell ]
+#        for cell in senseSDR.sparse:
+#            agentClass.spColumnElasticity[ cell ] += 0.1 * ( 1 - numpy.exp( -sum / 100 ) )
 
-    # Change spColumnConnects connections to make SDRvector closer to activeVector, according to elasticity of cells.
-    # Change vectorNetwork synapses to make activeVector closer to SDRvector, according to elasticity of cells.
-    for col in range( agentClass.vectorNetwork.numColumns ):
-#        if agentClass.goalOrigin:
-#            if
+#    for col in range( agentClass.vectorNetwork.numColumns ):
+#        # Generate current place cell vector.
+#        columnValue = 0
+#        for active in senseSDR.sparse:
+#            columnValue += agentClass.spColumnConnects[ active ][ col ]
+#
+#        print ( "----------------------------" )
+#        print ( "Elasticity:", agentClass.spColumnElasticity[ col ] )
+#        print ( "ColumnValue:", columnValue )
+#        print ( "activeVector:", agentClass.activeVector[ col ] )
+#
+#        if columnValue >= transVectorRep[ col ]:
+#            columnValue = 0                                             # THIS IS FOR THE PRINT
+#            # Change spColumnConnects connections to make place vector closer to predVectorRep.
+#            for active in senseSDR.sparse:
+#                agentClass.spColumnConnects[ active ][ col ] -= 0.01 )
+#                columnValue += agentClass.spColumnConnects[ active ][ col ]         # THIS IS FOR THE PRINT
+#
+#            # Change vectorNetwork synapses to make predVectorRep closer to  place vector.
+#            agentClass.vectorNetwork.AdjustSynapse( col, transVectorSDR, lessThan=True )
+#        else:
+#            columnValue = 0                                 # THIS IS FOR THE PRINT
+#            # Change spColumnConnects connections to make place vector closer to predVectorRep.
+#            for active in senseSDR.sparse:
+#                agentClass.spColumnConnects[ active][ col ] += 0.01 )
+#                columnValue += agentClass.spColumnConnects[ active ][ col ]         # THIS IS FOR THE PRINT
 
-        columnValue = 0
-        for active in senseSDR.sparse:
-            columnValue += agentClass.spColumnConnects[ active ][ col ]
-        print ( "----------------------------" )
-        print ( "Elasticity:", agentClass.spColumnElasticity[ col ] )
-        print ( "ColumnValue:", columnValue )
-        print ( "activeVector:", agentClass.activeVector[ col ] )
-        if columnValue >= agentClass.activeVector[ col ]:
-            columnValue = 0                                 # This is for the print.
-            for active in senseSDR.sparse:
-                agentClass.spColumnConnects[ active ][ col ] -= 0.01 * numpy.exp( -agentClass.spColumnElasticity[ col ] / 100 )
-                columnValue += agentClass.spColumnConnects[ active ][ col ]         # This is for the print.
+            # Change vectorNetwork synapses to make predVectorRep closer to  place vector.
+#            agentClass.vectorNetwork.AdjustSynapse( col, transVectorSDR, lessThan=False )
 
-            agentClass.vectorNetwork.AdjustSynapse( col, transVectorSDR, True, agentClass.spColumnElasticity[ col ] )
-        else:
-            columnValue = 0                                 # This is for the print.
-            for active in senseSDR.sparse:
-                agentClass.spColumnConnects[ active][ col ] += 0.01 * numpy.exp( -agentClass.spColumnElasticity[ col ] / 100 )
-                columnValue += agentClass.spColumnConnects[ active ][ col ]         # This is for the print.
+#        print( "Adjusted ColumnValue:", columnValue )
 
-            agentClass.vectorNetwork.AdjustSynapse( col, transVectorSDR, False, agentClass.spColumnElasticity[ col ] )
+#    agentClass.vectorNetwork.ranActivate = False
 
-        print( "Adjusted ColumnValue:", columnValue )
+    if len( agentClass.memBuffer ) > 0:
+        # Get the cells that turned on from lastSDR to senseSDR. These are the only ones we will check for cycles.
+        intersectSDR = numpy.intersect1d( senseSDR.sparse, agentClass.memBuffer[ 0 ][ 0 ].sparse, assume_unique=True )
+        turnOnSDR    = numpy.setdiff1d( senseSDR.sparse, intersectSDR, assume_unique=True )
 
-    agentClass.vectorNetwork.ranActivate = False
+        # Look for the last occurrence of this cell being on.
+        for on in turnOnSDR:
+            cycleOrigin = -1
+            for buffIdx in range( len( agentClass.memBuffer ) ):
+                if on in agentClass.memBuffer[ buffIdx ][ 0 ].sparse:
+                    cycleOrigin = buffIdx
+                    break
+
+            # If we found one then perform learning on it.
+            if cycleOrigin != -1:
+                # Assume simple linear motion away and then back.
+                cWidth  = ( cycleOrigin + 1 ) / 2
+                cCentre = numpy.ceil( cWidth )
+                cFar    = agentClass.memBuffer[ int( cCentre ) ][ 1 ][ 0 ]          # FOR NOW WE TAKE JUST 0 DIMENSION
+                cOrigin = agentClass.memBuffer[ cycleOrigin ][ 1 ][ 0 ]             # FOR NOW WE TAKE JUST 0 DIMENSION
+
+                # Calculate what the cycle thinks this dimension should be for the elements in the cycle.
+                for learnIdx in range( buffIdx ):
+                    if cFar >= cOrigin:
+                        predValue = -( ( cFar - cOrigin ) / cWidth ) * numpy.absolute( ( learnIdx - cCentre ) ) + cFar
+                    else:
+                        predValue = ( ( cOrigin - cFar ) / cWidth ) * numpy.absolute( ( learnIdx - cCentre ) ) + cFar
+
+                    if agentClass.memBuffer[ learnIdx ][ 1 ][ 0 ] > predValue:
+                        for active in agentClass.memBuffer[ learnIdx ][ 0 ].sparse:
+                            for col in range( agentClass.vectorNetwork.numColumns ):
+                                agentClass.spColumnConnects[ active ][ col ] -= 0.005
+                    elif agentClass.memBuffer[ learnIdx ][ 1 ][ 0 ] < predValue:
+                        for active in agentClass.memBuffer[ learnIdx ][ 0 ].sparse:
+                            for col in range( agentClass.vectorNetwork.numColumns ):
+                                agentClass.spColumnConnects[ active ][ col ] += 0.005
+
+    # Add stuff to buffer.
+    agentClass.memBuffer.insert( 0, [ senseSDR, senseVector ] )
+    if len( agentClass.memBuffer ) >= 100:
+        agentClass.memBuffer.pop( -1 )
 
     # If we arrive at the den then learn on the sequence.
 #    if agentDraw.xcor() == 0 and agentDraw.ycor() == 0:
@@ -504,17 +573,23 @@ while True:
 #                agentClass.ActivateColumns( greatestOverlap[ 1 ], agentClass.lastPlaceCell, True, False )
 #            agentClass.lastPlaceCell = greatestOverlap[ 1 ]
 
+    # Move back to the origin when triggered to.
     if agentClass.goalOrigin:
         # Try to move towards origin.
-        whichWay = numpy.zeros( 2, dtype=numpy.float32 )
-        for idx in range( agentClass.vectorNetwork.numColumns ):
-            whichWay[ 0 ] -= agentClass.motorDecoderSynapse[ idx ] * agentClass.activeVector[ idx ]
-            whichWay[ 1 ] -= agentClass.motorDecoderSynapse[ idx + agentClass.vectorNetwork.numColumns ] * agentClass.activeVector[ idx ]
+#        whichWay = numpy.zeros( 2, dtype=numpy.float32 )
+#        for idx in range( agentClass.vectorNetwork.numColumns ):
+#            whichWay[ 0 ] -= agentClass.motorDecoderSynapse[ idx ] * agentClass.activeVector[ idx ]
+#            whichWay[ 1 ] -= agentClass.motorDecoderSynapse[ idx + agentClass.vectorNetwork.numColumns ] * agentClass.activeVector[ idx ]
 
-        if whichWay[ 0 ] >= whichWay[ 1 ]:
+#        if whichWay[ 0 ] >= whichWay[ 1 ]:
+#            motorOutput = 0
+#        else:
+#            motorOutput = 1
+        if agentDraw.xcor() >= 0:
             motorOutput = 0
         else:
             motorOutput = 1
+
     else:
         # Randomly choose motor output.
         motorOutput = random.randint( 0, 1 )
