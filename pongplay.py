@@ -7,6 +7,7 @@ import numpy
 import yaml
 import random
 import time
+from pynput import keyboard
 
 from htm.bindings.sdr import SDR, Metrics
 from htm.encoders.rdse import RDSE, RDSE_Parameters
@@ -75,6 +76,283 @@ pen.hideturtle()
 pen.goto(0, 260)
 pen.write("Player A: 0  Player B: 0", align="center", font=("Courier", 24, "normal"))
 
+class Agent:
+    #----------------------------------------------------------------------
+    testThreshold   = 30
+    motorDimensions = 3
+
+    # Set up encoder parameters
+    paddleEncodeParams    = ScalarEncoderParameters()
+    ballXEncodeParams     = ScalarEncoderParameters()
+    ballYEncodeParams     = ScalarEncoderParameters()
+    ballVelEncodeParams   = RDSE_Parameters()
+    manInEncodeParams     = ScalarEncoderParameters()
+
+    paddleEncodeParams.activeBits = 99
+    paddleEncodeParams.radius     = 200
+    paddleEncodeParams.clipInput  = False
+    paddleEncodeParams.minimum    = -screenHeight / 2
+    paddleEncodeParams.maximum    = screenHeight / 2
+    paddleEncodeParams.periodic   = False
+
+    ballXEncodeParams.activeBits = 21
+    ballXEncodeParams.radius     = 40
+    ballXEncodeParams.clipInput  = False
+    ballXEncodeParams.minimum    = -screenWidth / 2
+    ballXEncodeParams.maximum    = screenWidth / 2
+    ballXEncodeParams.periodic   = False
+
+    ballYEncodeParams.activeBits = 21
+    ballYEncodeParams.radius     = 40
+    ballYEncodeParams.clipInput  = False
+    ballYEncodeParams.minimum    = -screenHeight
+    ballYEncodeParams.maximum    = screenHeight
+    ballYEncodeParams.periodic   = False
+
+    ballVelEncodeParams.size       = 400
+    ballVelEncodeParams.activeBits = 20
+    ballVelEncodeParams.resolution = 0.1
+
+    manInEncodeParams.activeBits = 10
+    manInEncodeParams.radius     = 1
+    manInEncodeParams.clipInput  = False
+    manInEncodeParams.minimum    = -1
+    manInEncodeParams.maximum    = 2
+    manInEncodeParams.periodic   = False
+
+
+    def __init__( self, name ):
+        self.ID = name
+
+        self.SDRList = []           # List of SDR's to check against present moment.
+        self.seqList = []           # List of sequences I've observed from this point, indexes referenced as in SDRList.
+                                    # Each element is a list of sequences, each element of form :
+                                    #   [ x ][ 0 ] = Final feeling of this sequence, in range [ -1, 1 ].
+                                    #   [ x ][ 1 ] = Next seen active cells in this sequence.
+
+        self.senseBuffer = []       # Memory of all senseSDR's experienced this sequence.
+        self.cellsBuffer = []       # Memory of all active cells this sequence, referenced as in senseBuffer.
+
+        # Set up encoders
+        self.paddleEncoder   = ScalarEncoder( self.paddleEncodeParams )
+        self.ballEncoderX    = ScalarEncoder( self.ballXEncodeParams )
+        self.ballEncoderY    = ScalarEncoder( self.ballYEncodeParams )
+        self.ballEncoderVelX = RDSE( self.ballVelEncodeParams )
+        self.ballEncoderVelY = RDSE( self.ballVelEncodeParams )
+        self.manInEncoder    = ScalarEncoder( self.manInEncodeParams )
+
+        self.encodingWidth = ( self.paddleEncoder.size + self.ballEncoderX.size + self.ballEncoderY.size +
+            self.ballEncoderVelX.size + self.ballEncoderVelY.size + self.manInEncoder.size )
+
+        self.sp = SpatialPooler(
+            inputDimensions            = ( self.encodingWidth, ),
+            columnDimensions           = ( 2048, ),
+            potentialPct               = 0.85,
+            potentialRadius            = self.encodingWidth,
+            globalInhibition           = True,
+            localAreaDensity           = 0,
+            numActiveColumnsPerInhArea = 40,
+            synPermInactiveDec         = 0.005,
+            synPermActiveInc           = 0.04,
+            synPermConnected           = 0.1,
+            boostStrength              = 3.0,
+            seed                       = -1,
+            wrapAround                 = True
+        )
+
+        self.tp = TemporalMemory(
+            columnDimensions          = ( 2048, ),
+            cellsPerColumn            = 32,
+            activationThreshold       = 16,
+            initialPermanence         = 0.21,
+            connectedPermanence       = 0.1,
+            minThreshold              = 12,
+            maxNewSynapseCount        = 20,
+            permanenceIncrement       = 0.1,
+            permanenceDecrement       = 0.1,
+            predictedSegmentDecrement = 0.0,
+            maxSegmentsPerCell        = 128,
+            maxSynapsesPerSegment     = 32,
+            seed                      = 42
+        )
+
+        self.motorSynapse = numpy.random.uniform(
+            low = 0.0, high = 1.0, size = ( self.tp.getColumnDimensions()[ 0 ] * self.tp.getCellsPerColumn() * self.motorDimensions, )
+        )
+
+        self.manualInput = -1
+
+    def Reset ( self ):
+    # Resets temoral memory for start of new sequence, and clears senseSDR sequence buffer.
+        self.tp.reset()
+        self.senseBuffer.clear()
+        self.cellsBuffer.clear()
+
+    def SendSuggest ( self, input ):
+    # Sets the movement suggestion from user. manualInput = -1 means no suggestion.
+        self.manualInput = input
+
+    def EncodeSenseData ( self, yPos, ballX, ballY, ballXSpeed, ballYSpeed ):
+    # Encodes sense data as an SDR and returns it.
+
+        # Now we call the encoders to create bit representations for each value, and encode them.
+        paddleBits   = self.paddleEncoder.encode( yPos )
+        ballBitsX    = self.ballEncoderX.encode( ballX )
+        ballBitsY    = self.ballEncoderY.encode( ballY )
+        ballBitsVelX = self.ballEncoderVelX.encode( ballXSpeed )
+        ballBitsVelY = self.ballEncoderVelY.encode( ballYSpeed )
+        manInBits    = self.manInEncoder.encode( self.manualInput )
+
+        # Concatenate all these encodings into one large encoding for Spatial Pooling.
+        encoding = SDR( self.encodingWidth ).concatenate( [ paddleBits, ballBitsX, ballBitsY, ballBitsVelX, ballBitsVelY, manInBits ] )
+        senseSDR = SDR( self.sp.getColumnDimensions() )
+        self.sp.compute( encoding, True, senseSDR )
+
+        return senseSDR
+
+    def Overlap ( self, SDR1, SDR2 ):
+    # Computes overlap score between two passed SDRs.
+
+        overlap = 0
+
+        for cell1 in SDR1.sparse:
+            if cell1 in SDR2.sparse:
+                overlap += 1
+
+        return overlap
+
+    def GreatestOverlap ( self, testSDR, listSDR, threshold ):
+    # Finds SDR in listSDR with greatest overlap with testSDR and returns it, and its index in the list.
+    # If none are found above threshold or if list is empty it returns an empty SDR of length testSDR, with index -1.
+
+        greatest = [ SDR( testSDR.size ), -1 ]
+
+        if len(listSDR) > 0:
+            # The first element of listSDR should always be a union of all the other SDRs in list,
+            # so a check can be performed first.
+            if self.Overlap( testSDR, listSDR[0] ) >= threshold:
+                aboveThreshold = []
+                for idx, checkSDR in enumerate( listSDR ):
+                    if idx != 0:
+                        thisOverlap = self.Overlap( testSDR, checkSDR )
+                        if thisOverlap >= threshold:
+                            aboveThreshold.append( [ thisOverlap, [checkSDR, idx] ] )
+                if len( aboveThreshold ) > 0:
+                    greatest = sorted( aboveThreshold, key = lambda tup: tup[0], reverse = True )[ 0 ][ 1 ]
+
+        return greatest
+
+    def Hippocampus ( self, feeling ):
+    # Stores sequence along with feeling.
+
+        if feeling > 1.0 or feeling < -1.0:
+            sys.exit( "Feeling states should be in the range [-1.0, 1.0]" )
+
+        for idx, pastSDR in enumerate( self.senseBuffer ):
+            # Check if we've already seen this SDR.
+            greatestSDR = self.GreatestOverlap( pastSDR, self.SDRList, self.sp.getNumActiveColumnsPerInhArea() )
+
+            if idx < len( self.senseBuffer ) - 1:
+                # If we haven't then add the SDR and the next seen active cells in the sequence.
+                if greatestSDR[ 1 ] == -1:
+                    self.SDRList.append( pastSDR )
+
+                    seqList = []
+                    insertSeq = [ feeling, self.cellsBuffer[ idx + 1 ] ]
+                    seqList.append( insertSeq )
+                    self.seqList.append( seqList )
+
+                # If we have seen the SDR then check if the next active cells in the sequence are stored.
+                else:
+                    for seq in self.seqList[ greatestSDR[ 1 ] ]:
+                        if self.Overlap( seq[ 1 ], self.cellsBuffer[ idx + 1 ] ) >= self.testThreshold:
+                            # If they are stored then do they have the same feeling?
+                            if seq[ 0 ] != feeling:
+                                # If not then store it as a new sequence.
+                                insertSeq = [ feeling, self.cellsBuffer[ idx + 1 ] ]
+                                self.seqList[ greatestSDR[ 1 ] ].append( insertSeq )
+                        else:
+                            # If they are not stored then add it as a new sequence.
+                            insertSeq = [ feeling, self.cellsBuffer[ idx + 1 ] ]
+                            self.seqList[ greatestSDR[ 1 ] ].append( insertSeq )
+
+        print (len(self.SDRList))
+
+    def Brain ( self, yPos, ballX, ballY, ballXSpeed, ballYSpeed ):
+    # Agents brain center.
+
+        # Generate SDR for sense data by feeding sense data into SP with learning.
+        senseSDR = self.EncodeSenseData( yPos, ballX, ballY, ballXSpeed, ballYSpeed )
+
+        # Feed senseSDR into tp to get predictive cells.
+        self.tp.compute( senseSDR, learn = True )
+        self.tp.activateDendrites( learn = True )
+        actvCellsTP = self.tp.getActiveCells()
+        predCellsTP = self.tp.getPredictiveCells()
+
+        # Add senseSDR and predCellsTP to buffers.
+        self.senseBuffer.append( senseSDR )
+        self.cellsBuffer.append( actvCellsTP )
+
+        # Check if we've seen any of these predictive cell sequences before.
+        greatestSDR = self.GreatestOverlap( senseSDR, self.SDRList, self.testThreshold )
+
+        # Given these known sequences which one led to the most positive outcome?
+        greatestPositive = -1
+        if greatestSDR[ 1 ] != -1:
+            for idx, seq in enumerate( self.seqList[ greatestSDR[ 1 ] ] ):
+                if greatestPositive != -1:
+                    if self.seqList[ greatestSDR[ 1 ] ][ greatestPositive ][ 0 ] < seq[ 0 ]:
+                        greatestPositive = idx
+                else:
+                    if seq[ 0 ] > 0:
+                        greatestPositive = idx
+
+        # If we've detected a positive sequence feed these predictive cells to motor.
+        if greatestPositive != -1:
+            predToMotor = self.seqList[ greatestSDR[ 1 ] ][ greatestPositive ][ 1 ]
+        # If we didn't then feed all the predicted cells predCellsTP to motor.
+        else:
+            predToMotor = predCellsTP
+
+        motorScore = [ 0.0, 0.0, 0.0 ]         # Keeps track of each motor output weighted score [ UP, STILL, DOWN ]
+        # Use predToMotor to determine motor action by feeding through motorSynapse.
+        for cell in predToMotor.sparse:
+            for i in range( self.motorDimensions ):
+                motorScore[i] += self.motorSynapse[ ( cell * self.motorDimensions ) + i ]
+
+        # Use largest motorScore to choose winningMotor action.
+        largest = []
+        for i, v in enumerate( motorScore ):
+            if sorted( motorScore, reverse=True )[ 0 ] == v:
+                largest.append( i )                                         # 0 = UP, 1 = STILL, 2 = DOWN
+        winningMotor = random.choice( largest )
+
+        # Use winningMotor to support synapses leading to this one and inhibit those not.
+#        for cell in predToMotor.sparse:
+#            for i in range( self.motorDimensions ):
+#                if i == winningMotor:
+#                    self.motorSynapse[ ( cell * self.motorDimensions ) + i ] += 0.001
+#                else:
+#                    self.motorSynapse[ ( cell * self.motorDimensions ) + i ] -= 0.001
+
+        if self.manualInput != -1:
+            # If motor suggestion, manualInput, equals winningMotor then send a small reward.
+            if winningMotor == self.manualInput:
+                self.Hippocampus( 1.0 )
+            # If not send a small punishment.
+            else:
+                self.Hippocampus( -1.0 )
+
+        # Return winning motor function.
+        return winningMotor
+
+        #----------------------------------------------------------------------
+
+# Create play agents
+leftAgent = Agent( 'Left' )
+rightAgent = Agent( 'Right' )
+
 # Functions
 def paddle_a_up():
     y = paddle_a.ycor()
@@ -100,360 +378,20 @@ def paddle_b_down():
         y -= 20
         paddle_b.sety(y)
 
-class Agent:
-    goalThreshold = 30
-    motorSDRsize = 40                       # Size of SDRs stored in choosing winning motor action SDR.
-    goalSDRsize = 30
-    maxTimeBetGoal = 25                     # The maximum time allowed between goal states, more than this we add one
-
-    # Set up encoder parameters
-    paddleEncodeParams    = ScalarEncoderParameters()
-    ballXEncodeParams     = ScalarEncoderParameters()
-    ballYEncodeParams     = ScalarEncoderParameters()
-    ballVelEncodeParams   = RDSE_Parameters()
-    motorEncodeParams     = ScalarEncoderParameters()
-
-    paddleEncodeParams.activeBits = 99
-    paddleEncodeParams.radius     = 100
-    paddleEncodeParams.clipInput  = False
-    paddleEncodeParams.minimum    = -screenHeight / 2
-    paddleEncodeParams.maximum    = screenHeight / 2
-    paddleEncodeParams.periodic   = False
-
-    ballXEncodeParams.activeBits = 21
-    ballXEncodeParams.radius     = 20
-    ballXEncodeParams.clipInput  = False
-    ballXEncodeParams.minimum    = -screenWidth / 2
-    ballXEncodeParams.maximum    = screenWidth / 2
-    ballXEncodeParams.periodic   = False
-
-    ballYEncodeParams.activeBits = 21
-    ballYEncodeParams.radius     = 20
-    ballYEncodeParams.clipInput  = False
-    ballYEncodeParams.minimum    = -screenHeight
-    ballYEncodeParams.maximum    = screenHeight
-    ballYEncodeParams.periodic   = False
-
-    ballVelEncodeParams.size       = 400
-    ballVelEncodeParams.activeBits = 20
-    ballVelEncodeParams.resolution = 0.1
-
-    motorEncodeParams
-    motorEncodeParams.activeBits = 41
-    motorEncodeParams.radius     = 1
-    motorEncodeParams.clipInput  = False
-    motorEncodeParams.minimum    = 1
-    motorEncodeParams.maximum    = 3
-    motorEncodeParams.periodic   = False
-
-    def __init__( self, name ):
-        self.ID = name
-
-        # Set up buffer list
-        self.senseBuffer = []                         # Buffer of past input sense data state SDRs.
-        self.motorBuffer = []                         # Stores a tuple of MP input and winning motor output SDR.
-        self.goalStore = []                           # Stores tuple of all recognized goal state SDRs, and integer for count, and time last seen.
-
-        # Set up encoders
-        self.paddleEncoder   = ScalarEncoder( self.paddleEncodeParams )
-        self.ballEncoderX    = ScalarEncoder( self.ballXEncodeParams )
-        self.ballEncoderY    = ScalarEncoder( self.ballYEncodeParams )
-        self.ballEncoderVelX = RDSE( self.ballVelEncodeParams )
-        self.ballEncoderVelY = RDSE( self.ballVelEncodeParams )
-#        self.motorEncoder    = ScalarEncoder ( self.motorEncodeParams )
-
-        self.encodingWidth = ( self.paddleEncoder.size + self.ballEncoderX.size + self.ballEncoderY.size +
-            self.ballEncoderVelX.size + self.ballEncoderVelY.size )
-
-        self.sp = SpatialPooler(
-            inputDimensions            = (self.encodingWidth,),
-            columnDimensions           = (2048,),
-            potentialPct               = 0.85,
-            potentialRadius            = self.encodingWidth,
-            globalInhibition           = True,
-            localAreaDensity           = 0,
-            numActiveColumnsPerInhArea = 40,
-            synPermInactiveDec         = 0.005,
-            synPermActiveInc           = 0.04,
-            synPermConnected           = 0.1,
-            boostStrength              = 3.0,
-            seed                       = -1,
-            wrapAround                 = True
-        )
-
-        self.mp = TemporalMemory(
-            columnDimensions          = (67584,),
-            cellsPerColumn            = 1,
-            activationThreshold       = 16,
-            initialPermanence         = 0.21,
-            connectedPermanence       = 0.1,
-            minThreshold              = 12,
-            maxNewSynapseCount        = 20,
-            permanenceIncrement       = 0.1,
-            permanenceDecrement       = 0.1,
-            predictedSegmentDecrement = 0.0,
-            maxSegmentsPerCell        = 128,
-            maxSynapsesPerSegment     = 32,
-            seed=42
-        )
-
-        self.tp = TemporalMemory(
-            columnDimensions          = (2048,),
-            cellsPerColumn            = 32,
-            activationThreshold       = 16,
-            initialPermanence         = 0.21,
-            connectedPermanence       = 0.1,
-            minThreshold              = 12,
-            maxNewSynapseCount        = 20,
-            permanenceIncrement       = 0.1,
-            permanenceDecrement       = 0.1,
-            predictedSegmentDecrement = 0.0,
-            maxSegmentsPerCell        = 128,
-            maxSynapsesPerSegment     = 32,
-            seed=42
-        )
-
-    def ClearBuffer ( self ):
-    # Clears both buffers.
-
-        self.motorBuffer.clear()
-        self.senseBuffer.clear()
-
-    def EncodeSenseData ( self, yPos, ballX, ballY, ballXSpeed, ballYSpeed ):
-    # Encodes sense data as an SDR and returns it.
-
-        # Now we call the encoders to create bit representations for each value, and encode them.
-        paddleBits   = self.paddleEncoder.encode( yPos )
-        ballBitsX    = self.ballEncoderX.encode( ballX )
-        ballBitsY    = self.ballEncoderY.encode( ballY )
-        ballBitsVelX = self.ballEncoderVelX.encode( ballXSpeed )
-        ballBitsVelY = self.ballEncoderVelY.encode( ballYSpeed )
-#        motorBits = self.motorEncoder.encode( motorInput )
-
-        # Concatenate all these encodings into one large encoding for Spatial Pooling.
-        encoding = SDR( self.encodingWidth ).concatenate( [ paddleBits, ballBitsX, ballBitsY, ballBitsVelX, ballBitsVelY ] )
-        senseSDR = SDR( self.sp.getColumnDimensions() )
-        self.sp.compute( encoding, True, senseSDR )
-
-        return senseSDR
-
-    def Overlap ( self, SDR1, SDR2 ):
-    # Computes overlap score between two passed SDRs.
-
-        overlap = 0
-
-        for cell1 in SDR1.sparse:
-            if cell1 in SDR2.sparse:
-                overlap += 1
-
-        return overlap
-
-    def GreatestOverlap ( self, testSDR, listSDR, threshold ):
-    # Finds SDR in listSDR with greatest overlap with testSDR and returns it, and its index in the list.
-    # If none are found above threshold or if list is empty it returns an empty SDR of length testSDR.
-
-        greatest = [ SDR( testSDR.size ), -1 ]
-
-        if len(listSDR) > 0:
-            # The first element of listSDR should always be a union of all the other SDRs in list,
-            # so a check can be performed first.
-            if self.Overlap( testSDR, listSDR[0] ) >= threshold:
-                aboveThreshold = []
-                for idx, checkSDR in enumerate( listSDR ):
-                    if idx != 0:
-                        thisOverlap = self.Overlap( testSDR, checkSDR )
-                        if thisOverlap >= threshold:
-                            aboveThreshold.append( [ thisOverlap, [checkSDR, idx] ] )
-                if len( aboveThreshold ) > 0:
-                    greatest = sorted( aboveThreshold, key=lambda tup: tup[0], reverse=True )[ 0 ][ 1 ]
-
-        return greatest
-
-    def PredictionNetRewardEvent ( self ):
-    # Triggered when ball hits a paddle, trains the prediction network, PN
-
-        # Go through sense data buffer (from oldest to newest) and compare each state to the goal SDR storage.
-        # If any are found store, in order, any found goal SDR states. Also add occurrence integer to each found goal
-        # state, and reset their time since last seen to 1.
-        # Also, if it's been a while since we saw a goal state, add a new one to goal state storages, and union
-        # with first element in goalStore list.
-        foundGoals = []
-        timeBetGoal = 0
-        for indx, senseSDR in enumerate( self.senseBuffer ):
-            if indx != len( self.senseBuffer ) - 1:
-                timeBetGoal += 1
-                if len( self.goalStore ) > 1:
-                    testSDR = self.GreatestOverlap( senseSDR, [ i[0] for i in self.goalStore ], self.goalThreshold )
-                    if testSDR[1] != -1:
-                        foundGoals.append( testSDR[0] )
-                        self.goalStore[ testSDR[1] ][1] += 1
-                        self.goalStore[ testSDR[1] ][2] = 0
-                        timeBetGoal = 0
-                if timeBetGoal > self.maxTimeBetGoal:
-                    x = random.randint( 0, 100 )
-                    y = numpy.power( ( x * numpy.cbrt( self.maxTimeBetGoal / 2 ) / 50 ) - numpy.cbrt( self.maxTimeBetGoal / 2 ), 3 ) + ( self.maxTimeBetGoal / 2 )
-                    insStep = int( numpy.rint( y ) )
-                    if len( self.goalStore ) == 0:
-                        self.goalStore.append( [ SDR( senseSDR.size ), 0, 0 ] )
-                    self.goalStore.append( [ self.senseBuffer[ indx - insStep ], 1, 1 ] )
-                    self.goalStore[0][0].sparse = numpy.union1d( self.goalStore[0][0].sparse, self.senseBuffer[ indx - insStep ].sparse )
-                    foundGoals.append( self.senseBuffer[ indx - insStep ] )
-
-                    timeBetGoal = insStep
-            else:
-                # Add last senseData state to foundGoals at the end. This is the ball hitting paddle event.
-                testSDR = self.GreatestOverlap( senseSDR, [ i[0] for i in self.goalStore ], self.goalThreshold )
-                if testSDR[1] != -1:
-                    foundGoals.append( testSDR[0] )
-                    self.goalStore[ testSDR[1] ][1] += 1
-                    self.goalStore[ testSDR[1] ][2] = 0
-                else:
-                    self.goalStore.append( [ self.senseBuffer[ indx ], 1, 1 ] )
-                    self.goalStore[0][0].sparse = numpy.union1d( self.goalStore[0][0].sparse, self.senseBuffer[ indx ].sparse )
-                    foundGoals.append( self.senseBuffer[ indx ] )
-
-        # Train PM by:
-        # Starting with the oldest entry of sense data buffer, choose one.
-        nextFound = 0
-        for senseDataSDR in self.senseBuffer:
-
-            # Reset TP.
-            self.tp.reset()
-
-            # Feed in chosen entry to TP, with learning.
-            self.tp.compute( senseDataSDR, True )
-
-            # Check the chosen entry SDR if it is next goal state found above.
-            # If chosen entry is next found goal state feed subsequent found goal state into TP, with learning.
-            # If chosen entry isn’t next found goal state then feed in next found goal state into TP, with learning.
-            if self.Overlap( foundGoals[ nextFound ], senseDataSDR ) >= self.goalThreshold and nextFound + 1 != len( foundGoals ):
-                nextFound += 1
-            self.tp.compute( foundGoals[ nextFound ], True )
-
-            # Repeat for all steps of buffer.
-
-        # Goal state storage cleanup:
-        # Add one to each time since seen.
-        # Go through goal state storage and choose any goal states that haven’t been seen in 20+ turns,
-        # of these delete the 25% with the lowest event count.
-#        for goalStateSDR in self.goalStore:
-#            if goalStateSDR != self.goalStore[0]:
-#                goalStateSDR[2] += 1
-#                if goalStateSDR[2] >= 20:
-# DO THIS LATER, DONT FORGET TO SKIP FIRST ELEMENT WHICH IS UNION.
-
-        # Clear sense data buffer.
-        self.senseBuffer.clear()
-
-    def HabitualNetRewardEvent ( self, winningGoalSDR ):
-    # Triggered by PredictionNetwork when we successfully arrive at a goal state. Trains MP, habitual network.
-
-        # Train MP by:
-        # Starting with oldest entry of motor buffer, select one.
-        for motorSDR in self.motorBuffer:
-
-            # Reset MP.
-            self.mp.reset()
-
-            # Feed MP the chosen entry input, with learning.
-            self.mp.compute( motorSDR[ 0 ], True )
-
-            # Feed MP the chosen entry winning goal SDR, with learning.
-            self.mp.compute( motorSDR[ 1 ], True )
-
-            # Repeat above for all steps of buffer.
-
-        # Clear motor buffer.
-        self.motorBuffer.clear()
-
-    def PredictionNetwork ( self, senseSDR ):
-    # Predicts goal states in a temporally connected way.
-
-        # Check if we’ve reached any goal SDR by comparing overlap of all stored goal SDRs with sense data SDR.
-        # If any above threshold choose the one with highest overlap, run habitual network reward event.
-        reachedGoal = self.GreatestOverlap( senseSDR, [ i[0] for i in self.goalStore ], self.goalThreshold )
-        if reachedGoal[1] != -1:
-            self.HabitualNetRewardEvent( reachedGoal )
-
-        # Reset PN.
-        self.tp.reset()
-
-        # Plug sense data SDR into TP, without learning, to generate predicted cells.
-        self.tp.compute( senseSDR, False )
-        self.tp.activateDendrites( learn=False )
-        predCellsTP = self.tp.getPredictiveCells()
-
-        # Compare predicted cells against stored goal states. Choose best one above threshold as winning goal SDR.
-        # If there are no stored goal states then make winning goal SDR empty.
-        winningGoal = self.GreatestOverlap ( predCellsTP, [ i[0] for i in self.goalStore ], self.goalThreshold )
-
-        # Return winning goal SDR.
-        return winningGoal[0]
-
-    def Hippocampus ( self, yPos, ballX, ballY, ballXSpeed, ballYSpeed ):
-    # Agents brain center.
-
-        # Generate SDR for sense data by feeding sense data into SP with learning.
-        senseSDR = self.EncodeSenseData( yPos, ballX, ballY, ballXSpeed, ballYSpeed )
-
-        # Store sense data SDR into sense data buffer.
-        self.senseBuffer.append( senseSDR )
-
-        predTime = time.time()
-        # Run prediction network, sending it sense data SDR.
-        goalSDR = self.PredictionNetwork( senseSDR )
-        print ("Prediction Time:", time.time() - predTime)
-
-        #------------- Habitual network: -------------
-
-        habTime = time.time()
-
-        # Reset MP.
-        self.mp.reset()
-
-        # Concatenate sense data SDR + goal SDR (returned by prediction network)
-        # and feed result into MP, without learning, to produce predicted cells.
-        concateSDR = SDR( 67584 ).concatenate( senseSDR, goalSDR )
-        self.mp.compute( concateSDR, False )
-        self.mp.activateDendrites( learn=False )
-        predCellsMP = self.mp.getPredictiveCells()
-
-        # Choose some random cells from predCellsMP as winning motor SDR.
-        winningSDR = SDR( predCellsMP.size )
-        if predCellsMP.sparse.size >= self.motorSDRsize:
-            winningSDR.sparse = numpy.random.choice( predCellsMP.sparse, self.motorSDRsize, replace=False )
-        else:
-            appendArray = numpy.zeros( self.motorSDRsize - predCellsMP.sparse.size, dtype=numpy.uint32 )
-            for i in range( self.motorSDRsize - predCellsMP.sparse.size ):
-                while True:
-                    appendArray[i] = random.randint( 0, predCellsMP.size - 1 )
-                    if appendArray[i] not in predCellsMP.sparse and appendArray[i] not in [ appendArray[ii] for ii in range(i) ]:
-                        break
-            winningSDR.sparse = numpy.append( predCellsMP.sparse, appendArray )
-
-        # Add MP input SDR and winning SDR as single entry to motor buffer.
-        self.motorBuffer.append( [ concateSDR, winningSDR ] )
-
-        # Compute winning motor output from winning SDR through modular cell ID.
-        motorScore = [ 0, 0, 0 ]         # Keeps track of each motor output weighted score UP, STILL, DOWN
-        for idxMC in winningSDR.sparse:
-            motorScore[ idxMC % 3 ] += 1
-        largest = []
-        for i, v in enumerate( motorScore ):
-            if sorted( motorScore, reverse=True )[ 0 ] == motorScore[ i ]:
-                largest.append( i + 1 )                                         # 1 = UP, 2 = STILL, 3 = DOWN
-        winningMotor = random.choice( largest )
-
-        print ("Habitual Time:", time.time() - habTime)
-
-
-        # Return winning motor function.
-        return winningMotor
-
-
-# Create play agents
-leftAgent = Agent('Left')
-rightAgent = Agent('Right')
+def on_press(key):
+    if key.char   == ( 'w' ):
+        leftAgent.SendSuggest( 0 )
+    elif key.char == ( 's' ):
+        leftAgent.SendSuggest( 2 )
+    elif key == Key.escape:
+        sys.exit( "Quit program, escape key pressed." )
+
+
+def on_release(key):
+    leftAgent.SendSuggest( -1 )
+
+listener = keyboard.Listener( on_press = on_press, on_release = on_release )
+listener.start()
 
 while True:
 # Main game loop
@@ -483,8 +421,9 @@ while True:
         ball.goto(0, 0)
         ball.dx *= -1
         ball.dy *= random.choice( [ -1, 1 ] )
-        leftAgent.ClearBuffer()
-        rightAgent.ClearBuffer()
+        rightAgent.Hippocampus( -1.0 )
+        leftAgent.Reset()
+        rightAgent.Reset()
 
     elif ball.xcor() < -350:
         # Ball falls off left side of screen. B gets a point.
@@ -494,32 +433,37 @@ while True:
         ball.goto(0, 0)
         ball.dx *= -1
         ball.dy *= random.choice( [ -1, 1 ] )
-        leftAgent.ClearBuffer()
-        rightAgent.ClearBuffer()
+        leftAgent.Hippocampus( -1.0 )
+        leftAgent.Reset()
+        rightAgent.Reset()
 
     # Paddle and ball collisions
     if ball.xcor() < -340 and ball.ycor() < paddle_a.ycor() + 50 and ball.ycor() > paddle_a.ycor() - 50:
         # Ball hits paddle A
         ball.dx *= -1
         ball.goto( -340, ball.ycor() )
-        leftAgent.PredictionNetRewardEvent()
+        leftAgent.Hippocampus( 1.0 )
+        leftAgent.Reset()
+        rightAgent.Reset()
 
     elif ball.xcor() > 340 and ball.ycor() < paddle_b.ycor() + 50 and ball.ycor() > paddle_b.ycor() - 50:
         # Ball hits paddle B
         ball.dx *= -1
         ball.goto( 340, ball.ycor() )
-        rightAgent.PredictionNetRewardEvent()
+        rightAgent.Hippocampus( 1.0 )
+        leftAgent.Reset()
+        rightAgent.Reset()
 
     # Run each agents learning algorithm and produce movement.
-    leftMove = leftAgent.Hippocampus( paddle_a.ycor(), ball.xcor(), paddle_a.ycor() - ball.ycor(), ball.dx, ball.dy )
-    rightMove = rightAgent.Hippocampus( paddle_b.ycor(), ball.xcor(), paddle_b.ycor() - ball.ycor(), ball.dx, ball.dy )
+    leftMove = leftAgent.Brain( paddle_a.ycor(), ball.xcor(), paddle_a.ycor() - ball.ycor(), ball.dx, ball.dy )
+    rightMove = rightAgent.Brain( paddle_b.ycor(), ball.xcor(), paddle_b.ycor() - ball.ycor(), ball.dx, ball.dy )
 
-    if leftMove == 1:
+    if leftMove == 0:
         paddle_a_up()
-    elif leftMove == 3:
+    elif leftMove == 2:
         paddle_a_down()
 
-    if rightMove == 1:
+    if rightMove == 0:
         paddle_b_up()
-    elif rightMove == 3:
+    elif rightMove == 2:
         paddle_b_down()

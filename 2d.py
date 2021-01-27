@@ -124,63 +124,7 @@ def AnyInThreshold ( testSDR, listSDR, lowThreshold, highThreshold ):
 
     return False
 
-class VectorNet:
-
-    def __init__( self, inputSDRsize, numColumns, maxActive, synInactiveDec, synActiveInc ):
-
-        self.inputDim       = inputSDRsize
-        self.numColumns     = numColumns
-        self.maxActive      = maxActive
-        self.synInactiveDec = synInactiveDec
-        self.synActiveInc   = synActiveInc
-
-        self.synapse = numpy.random.uniform( low=-0.05, high=0.05, size=( inputSDRsize * numColumns, ) )
-
-        self.activeColumns = []
-        self.ranActivate   = False
-
-    def ActivateColumns( self, inputSDR ):
-    # Feed forward cells from inputSDR, along synapses, to activate columns in vector representation.
-    # Then return vector representation.
-
-        # Feed forward inputSDR along synapses to get column activation.
-        columnActivation = numpy.zeros( self.numColumns, dtype=numpy.float32 )
-        for col in range( self.numColumns ):
-            for cell in inputSDR.sparse:
-                columnActivation[ col ] += self.synapse[ ( cell * self.numColumns ) + col ]
-
-        # Find the top active columns, numbering maxActive, and feed the activation into these.
-        maxActiveColumns = numpy.absolute( columnActivation ).argsort( )[ -self.maxActive: ][ ::-1 ]
-        transformActive = numpy.zeros( self.numColumns, dtype=numpy.float32 )
-        for act in maxActiveColumns:
-            transformActive[ act ] = columnActivation[ act ]
-
-        self.activeColumns = maxActiveColumns
-        self.ranActivate   = True
-
-        return transformActive
-
-    def AdjustSynapse( self, colID, inputSDR, lessThan ):
-    # Adjust the active synapse connections to reduce error between actual vector and projected vector.
-    # If lessThan is False then decrease active synapses connecting to that column, if True then increase them.
-
-        if not self.ranActivate:
-            sys.exit( "Custom Error: Run ActivateColumns() before AdjustSynapse()" )
-
-        if colID in self.activeColumns:
-            inc = self.synActiveInc
-        else:
-            inc = self.synInactiveDec
-
-        if lessThan:
-            flip = 1
-        else:
-            flip = -1
-
-        for cell in inputSDR.sparse:
-            self.synapse[ ( cell * self.numColumns ) + colID ] += inc * flip
-
-class Agent:
+class Agent:    #---------------------------------------------------------------
 
 #    placeCellThresholdLow = 15
 #    placeCellThresholdHigh = 30
@@ -190,14 +134,14 @@ class Agent:
     agentYEncodeParams = ScalarEncoderParameters( )
 
     agentXEncodeParams.activeBits = 40
-    agentXEncodeParams.radius     = 50
+    agentXEncodeParams.radius     = 70
     agentXEncodeParams.clipInput  = False
     agentXEncodeParams.minimum    = -screenWidth / 2
     agentXEncodeParams.maximum    = screenWidth / 2
     agentXEncodeParams.periodic   = False
 
     agentYEncodeParams.activeBits = 40
-    agentYEncodeParams.radius     = 50
+    agentYEncodeParams.radius     = 70
     agentYEncodeParams.clipInput  = False
     agentYEncodeParams.minimum    = -screenHeight / 2
     agentYEncodeParams.maximum    = screenHeight / 2
@@ -249,8 +193,6 @@ class Agent:
             maxSynapsesPerSegment     = 32,
             seed                      = 42
         )
-
-        self.vectorNetwork = VectorNet( self.tp.getCellsPerColumn() * self.tp.getColumnDimensions()[ 0 ], 1, 5, 0.01, 0.05 )
 
         self.lastSDR = SDR( self.sp.getColumnDimensions() )
 #        self.activeVector = numpy.zeros( self.vectorNetwork.numColumns, dtype=numpy.float32 )
