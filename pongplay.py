@@ -26,9 +26,6 @@ screenWidth = 800
 xSpeed = 1                   # Speed for ball
 ySpeed = 1
 
-score_a = 0                 # Used to keep track of score
-score_b = 0
-
 # Set up Turtle screen
 import turtle
 
@@ -74,12 +71,22 @@ pen.color("white")
 pen.penup()
 pen.hideturtle()
 pen.goto(0, 260)
-pen.write("Player A: 0  Player B: 0", align="center", font=("Courier", 24, "normal"))
+pen.write(
+    "Left Agent: {}% on {} events".format(0, 0 ),
+    align = "center", font = ("Courier", 24, "normal")
+)
+pen.goto(0, 230)
+pen.write(
+    "Right Agent: {}% on {} events".format(0, 0 ),
+    align = "center", font = ("Courier", 24, "normal")
+)
 
 class Agent:
     #----------------------------------------------------------------------
     testThreshold   = 30
     motorDimensions = 3
+    synapseInc = 0.05
+    synapseDec = 0.01
 
     # Set up encoder parameters
     paddleEncodeParams    = ScalarEncoderParameters()
@@ -110,7 +117,7 @@ class Agent:
     ballYEncodeParams.periodic   = False
 
     ballVelEncodeParams.size       = 400
-    ballVelEncodeParams.activeBits = 20
+    ballVelEncodeParams.activeBits = 25
     ballVelEncodeParams.resolution = 0.1
 
     manInEncodeParams.activeBits = 10
@@ -120,18 +127,10 @@ class Agent:
     manInEncodeParams.maximum    = 2
     manInEncodeParams.periodic   = False
 
-
     def __init__( self, name ):
         self.ID = name
 
-        self.SDRList = []           # List of SDR's to check against present moment.
-        self.seqList = []           # List of sequences I've observed from this point, indexes referenced as in SDRList.
-                                    # Each element is a list of sequences, each element of form :
-                                    #   [ x ][ 0 ] = Final feeling of this sequence, in range [ -1, 1 ].
-                                    #   [ x ][ 1 ] = Next seen active cells in this sequence.
-
-        self.senseBuffer = []       # Memory of all senseSDR's experienced this sequence.
-        self.cellsBuffer = []       # Memory of all active cells this sequence, referenced as in senseBuffer.
+        self.senseBuffer = []       # Memory of all [ senseSDR, winningMotor ] experienced this sequence.
 
         # Set up encoders
         self.paddleEncoder   = ScalarEncoder( self.paddleEncodeParams )
@@ -177,20 +176,25 @@ class Agent:
         )
 
         self.motorSynapse = numpy.random.uniform(
-            low = 0.0, high = 1.0, size = ( self.tp.getColumnDimensions()[ 0 ] * self.tp.getCellsPerColumn() * self.motorDimensions, )
+            low = 0.0, high = 1.0,
+            size = ( self.tp.getColumnDimensions()[ 0 ] * self.tp.getCellsPerColumn() * self.motorDimensions, )
         )
 
         self.manualInput = -1
 
-    def Reset ( self ):
-    # Resets temoral memory for start of new sequence, and clears senseSDR sequence buffer.
-        self.tp.reset()
+        self.numEvents = 0
+        self.numSuccess = 0
+
+    def Clear ( self ):
+    # Clear sense buffer.
         self.senseBuffer.clear()
-        self.cellsBuffer.clear()
+        self.tp.reset()
+
 
     def SendSuggest ( self, input ):
     # Sets the movement suggestion from user. manualInput = -1 means no suggestion.
         self.manualInput = input
+        self.tp.reset()
 
     def EncodeSenseData ( self, yPos, ballX, ballY, ballXSpeed, ballYSpeed ):
     # Encodes sense data as an SDR and returns it.
@@ -210,6 +214,7 @@ class Agent:
 
         return senseSDR
 
+    # NOT USED CURRENTLY
     def Overlap ( self, SDR1, SDR2 ):
     # Computes overlap score between two passed SDRs.
 
@@ -221,6 +226,7 @@ class Agent:
 
         return overlap
 
+    # NOT USED CURRENTLY
     def GreatestOverlap ( self, testSDR, listSDR, threshold ):
     # Finds SDR in listSDR with greatest overlap with testSDR and returns it, and its index in the list.
     # If none are found above threshold or if list is empty it returns an empty SDR of length testSDR, with index -1.
@@ -242,41 +248,59 @@ class Agent:
 
         return greatest
 
-    def Hippocampus ( self, feeling ):
-    # Stores sequence along with feeling.
+    def DetermineBurstPercent ( self ):
+    # Calculates percentage of active cells that are currently bursting.
+
+        activeCellsTP = self.tp.getActiveCells()
+
+        # Get columns of all active cells.
+        activeColumnsTP = []
+        for cCell in activeCellsTP.sparse:
+            activeColumnsTP.append( self.tp.columnForCell( cCell ) )
+
+        # Get count of active cells in each active column.
+        colUnique, colCount = numpy.unique( activeColumnsTP, return_counts = True )
+
+        # Compute percentage of columns that are bursting.
+        bursting = 0
+        for c in colCount:
+            if c > 1:
+                bursting += 1
+        burstPercent = int( 100 * bursting / len( colCount ) )
+
+        return burstPercent
+
+    def Hippocampus ( self, feeling, sequenceLength ):
+    # Learns sequence back sequenceLength-time steps in memory, then stores sequence along with feeling.
 
         if feeling > 1.0 or feeling < -1.0:
             sys.exit( "Feeling states should be in the range [-1.0, 1.0]" )
 
-        for idx, pastSDR in enumerate( self.senseBuffer ):
-            # Check if we've already seen this SDR.
-            greatestSDR = self.GreatestOverlap( pastSDR, self.SDRList, self.sp.getNumActiveColumnsPerInhArea() )
+        if len( self.senseBuffer ) == 0:
+            return None
+        elif len( self.senseBuffer ) < sequenceLength:
+            learnRange = len( self.senseBuffer )
+        else:
+            learnRange = sequenceLength
 
-            if idx < len( self.senseBuffer ) - 1:
-                # If we haven't then add the SDR and the next seen active cells in the sequence.
-                if greatestSDR[ 1 ] == -1:
-                    self.SDRList.append( pastSDR )
+        self.tp.reset()
+        for idx in range( learnRange ):
+            # Learn sequence in tp back sequenceLength-time steps.
+            self.tp.compute( self.senseBuffer[ learnRange - idx - 1 ][ 0 ], learn = True )
+            self.tp.activateDendrites( learn = True )
+            winnerCellsTP = self.tp.getWinnerCells()
 
-                    seqList = []
-                    insertSeq = [ feeling, self.cellsBuffer[ idx + 1 ] ]
-                    seqList.append( insertSeq )
-                    self.seqList.append( seqList )
-
-                # If we have seen the SDR then check if the next active cells in the sequence are stored.
-                else:
-                    for seq in self.seqList[ greatestSDR[ 1 ] ]:
-                        if self.Overlap( seq[ 1 ], self.cellsBuffer[ idx + 1 ] ) >= self.testThreshold:
-                            # If they are stored then do they have the same feeling?
-                            if seq[ 0 ] != feeling:
-                                # If not then store it as a new sequence.
-                                insertSeq = [ feeling, self.cellsBuffer[ idx + 1 ] ]
-                                self.seqList[ greatestSDR[ 1 ] ].append( insertSeq )
-                        else:
-                            # If they are not stored then add it as a new sequence.
-                            insertSeq = [ feeling, self.cellsBuffer[ idx + 1 ] ]
-                            self.seqList[ greatestSDR[ 1 ] ].append( insertSeq )
-
-        print (len(self.SDRList))
+            # Train motor connections based on winner cells and remembered winningMotor.
+            for cell in winnerCellsTP.sparse:
+                for i in range( self.motorDimensions ):
+                    if i == self.senseBuffer[ learnRange - idx - 1 ][ 1 ]:
+                        self.motorSynapse[ ( cell * self.motorDimensions ) + i ] += self.synapseInc * feeling
+                        if self.motorSynapse[ ( cell * self.motorDimensions ) + i ] > 1.0:
+                            self.motorSynapse[ ( cell * self.motorDimensions ) + i ] = 1.0
+                    else:
+                        self.motorSynapse[ ( cell * self.motorDimensions ) + i ] -= self.synapseDec * feeling
+                        if self.motorSynapse[ ( cell * self.motorDimensions ) + i ] < 0.0:
+                            self.motorSynapse[ ( cell * self.motorDimensions ) + i ] = 0.0
 
     def Brain ( self, yPos, ballX, ballY, ballXSpeed, ballYSpeed ):
     # Agents brain center.
@@ -284,40 +308,17 @@ class Agent:
         # Generate SDR for sense data by feeding sense data into SP with learning.
         senseSDR = self.EncodeSenseData( yPos, ballX, ballY, ballXSpeed, ballYSpeed )
 
-        # Feed senseSDR into tp to get predictive cells.
+        # Feed present senseSDR into tp and generate active cells.
         self.tp.compute( senseSDR, learn = True )
         self.tp.activateDendrites( learn = True )
-        actvCellsTP = self.tp.getActiveCells()
-        predCellsTP = self.tp.getPredictiveCells()
+        winnerCellsTP = self.tp.getWinnerCells()
 
-        # Add senseSDR and predCellsTP to buffers.
-        self.senseBuffer.append( senseSDR )
-        self.cellsBuffer.append( actvCellsTP )
-
-        # Check if we've seen any of these predictive cell sequences before.
-        greatestSDR = self.GreatestOverlap( senseSDR, self.SDRList, self.testThreshold )
-
-        # Given these known sequences which one led to the most positive outcome?
-        greatestPositive = -1
-        if greatestSDR[ 1 ] != -1:
-            for idx, seq in enumerate( self.seqList[ greatestSDR[ 1 ] ] ):
-                if greatestPositive != -1:
-                    if self.seqList[ greatestSDR[ 1 ] ][ greatestPositive ][ 0 ] < seq[ 0 ]:
-                        greatestPositive = idx
-                else:
-                    if seq[ 0 ] > 0:
-                        greatestPositive = idx
-
-        # If we've detected a positive sequence feed these predictive cells to motor.
-        if greatestPositive != -1:
-            predToMotor = self.seqList[ greatestSDR[ 1 ] ][ greatestPositive ][ 1 ]
-        # If we didn't then feed all the predicted cells predCellsTP to motor.
-        else:
-            predToMotor = predCellsTP
+        if self.DetermineBurstPercent() <= 5:
+            print("Less than 5% burst")
 
         motorScore = [ 0.0, 0.0, 0.0 ]         # Keeps track of each motor output weighted score [ UP, STILL, DOWN ]
-        # Use predToMotor to determine motor action by feeding through motorSynapse.
-        for cell in predToMotor.sparse:
+        # Use active cells to determine motor action by feeding through motorSynapse.
+        for cell in winnerCellsTP.sparse:
             for i in range( self.motorDimensions ):
                 motorScore[i] += self.motorSynapse[ ( cell * self.motorDimensions ) + i ]
 
@@ -328,21 +329,16 @@ class Agent:
                 largest.append( i )                                         # 0 = UP, 1 = STILL, 2 = DOWN
         winningMotor = random.choice( largest )
 
-        # Use winningMotor to support synapses leading to this one and inhibit those not.
-#        for cell in predToMotor.sparse:
-#            for i in range( self.motorDimensions ):
-#                if i == winningMotor:
-#                    self.motorSynapse[ ( cell * self.motorDimensions ) + i ] += 0.001
-#                else:
-#                    self.motorSynapse[ ( cell * self.motorDimensions ) + i ] -= 0.001
+        # Add senseSDR and winningMotor to buffer.
+        self.senseBuffer.insert( 0, [ senseSDR, winningMotor ] )
 
         if self.manualInput != -1:
             # If motor suggestion, manualInput, equals winningMotor then send a small reward.
             if winningMotor == self.manualInput:
-                self.Hippocampus( 1.0 )
+                self.Hippocampus( 0.1, 2 )
             # If not send a small punishment.
             else:
-                self.Hippocampus( -1.0 )
+                self.Hippocampus( -0.1, 2 )
 
         # Return winning motor function.
         return winningMotor
@@ -354,6 +350,34 @@ leftAgent = Agent( 'Left' )
 rightAgent = Agent( 'Right' )
 
 # Functions
+def ReDrawScore():
+    if leftAgent.numEvents == 0:
+        leftPercent = 0.0
+    else:
+        leftPercent  = int( 100 * leftAgent.numSuccess / leftAgent.numEvents )
+    if rightAgent.numEvents == 0:
+        rightPercent = 0.0
+    else:
+        rightPercent = int( 100 * rightAgent.numSuccess / rightAgent.numEvents )
+
+    pen.clear()
+    pen.goto(0, 260)
+    pen.write(
+        "Left Agent: {}% on {} events".format(
+            leftPercent,
+            leftAgent.numEvents,
+        ),
+        align = "center", font = ("Courier", 24, "normal")
+    )
+    pen.goto(0, 230)
+    pen.write(
+        "Right Agent: {}% on {} events".format(
+            rightPercent,
+            rightAgent.numEvents,
+        ),
+        align = "center", font = ("Courier", 24, "normal")
+    )
+
 def paddle_a_up():
     y = paddle_a.ycor()
     if y < 290 - 100:
@@ -378,16 +402,15 @@ def paddle_b_down():
         y -= 20
         paddle_b.sety(y)
 
-def on_press(key):
-    if key.char   == ( 'w' ):
+def on_press( key ):
+    if str(key) == ( 'Key.esc' ):
+        quit()
+    elif str( key ) == ( 'w' ):
         leftAgent.SendSuggest( 0 )
-    elif key.char == ( 's' ):
+    elif str( key ) == ( 's' ):
         leftAgent.SendSuggest( 2 )
-    elif key == Key.escape:
-        sys.exit( "Quit program, escape key pressed." )
 
-
-def on_release(key):
+def on_release( key ):
     leftAgent.SendSuggest( -1 )
 
 listener = keyboard.Listener( on_press = on_press, on_release = on_release )
@@ -402,8 +425,7 @@ while True:
     ball.setx( ball.xcor() + ball.dx )
     ball.sety( ball.ycor() + ball.dy )
 
-    # Border checking
-    # Top and bottom
+    # Border checking top and bottom.
     if ball.ycor() > 290:
         ball.sety( 290 )
         ball.dy *= -1
@@ -412,52 +434,67 @@ while True:
         ball.sety( -290 )
         ball.dy *= -1
 
-    # Left and right
+    # Border checking left and right.
     if ball.xcor() > 350:
         # Ball falls off right side of screen. A gets a point.
-        score_a += 1
-        pen.clear()
-        pen.write("Player A: {}  Player B: {}".format(score_a, score_b), align="center", font=("Courier", 24, "normal"))
+        p = -( numpy.arctan( ( numpy.absolute( paddle_b.ycor() - ball.ycor() ) - ( screenHeight / 2 ) ) / 10 ) / numpy.pi ) - 0.5
+        rightAgent.Hippocampus( p, 5 )
+        leftAgent.Clear()
+        rightAgent.Clear()
+
+        rightAgent.numEvents += 1
+        ReDrawScore()
+
         ball.goto(0, 0)
         ball.dx *= -1
         ball.dy *= random.choice( [ -1, 1 ] )
-        rightAgent.Hippocampus( -1.0 )
-        leftAgent.Reset()
-        rightAgent.Reset()
 
     elif ball.xcor() < -350:
         # Ball falls off left side of screen. B gets a point.
-        score_b += 1
-        pen.clear()
-        pen.write("Player A: {}  Player B: {}".format(score_a, score_b), align="center", font=("Courier", 24, "normal"))
+        p = -( numpy.arctan( ( numpy.absolute( paddle_a.ycor() - ball.ycor() ) - ( screenHeight / 2 ) ) / 10 ) / numpy.pi ) - 0.5
+        leftAgent.Hippocampus( p, 5 )
+        leftAgent.Clear()
+        rightAgent.Clear()
+
+        leftAgent.numEvents += 1
+        ReDrawScore()
+
         ball.goto(0, 0)
         ball.dx *= -1
         ball.dy *= random.choice( [ -1, 1 ] )
-        leftAgent.Hippocampus( -1.0 )
-        leftAgent.Reset()
-        rightAgent.Reset()
 
     # Paddle and ball collisions
     if ball.xcor() < -340 and ball.ycor() < paddle_a.ycor() + 50 and ball.ycor() > paddle_a.ycor() - 50:
         # Ball hits paddle A
+        leftAgent.Hippocampus( 1.0, 20 )
+        leftAgent.Clear()
+        rightAgent.Clear()
+
+        leftAgent.numSuccess += 1
+        leftAgent.numEvents += 1
+        ReDrawScore()
+
         ball.dx *= -1
         ball.goto( -340, ball.ycor() )
-        leftAgent.Hippocampus( 1.0 )
-        leftAgent.Reset()
-        rightAgent.Reset()
 
     elif ball.xcor() > 340 and ball.ycor() < paddle_b.ycor() + 50 and ball.ycor() > paddle_b.ycor() - 50:
         # Ball hits paddle B
+        rightAgent.Hippocampus( 1.0, 20 )
+        leftAgent.Clear()
+        rightAgent.Clear()
+
+        rightAgent.numSuccess += 1
+        rightAgent.numEvents += 1
+        ReDrawScore()
+
         ball.dx *= -1
         ball.goto( 340, ball.ycor() )
-        rightAgent.Hippocampus( 1.0 )
-        leftAgent.Reset()
-        rightAgent.Reset()
 
     # Run each agents learning algorithm and produce movement.
     leftMove = leftAgent.Brain( paddle_a.ycor(), ball.xcor(), paddle_a.ycor() - ball.ycor(), ball.dx, ball.dy )
     rightMove = rightAgent.Brain( paddle_b.ycor(), ball.xcor(), paddle_b.ycor() - ball.ycor(), ball.dx, ball.dy )
 
+    # Move agents.
     if leftMove == 0:
         paddle_a_up()
     elif leftMove == 2:
