@@ -183,7 +183,7 @@ class Agent:
         self.manualInput = -1
 
         self.numEvents = 0
-        self.numSuccess = 0
+        self.percentSuccess = 0
 
     def Clear ( self ):
     # Clear sense buffer.
@@ -248,6 +248,15 @@ class Agent:
 
         return greatest
 
+    def UpdateScore ( self, successEvent ):
+    # Updates agents event and success percentage.
+
+        numSuccess = self.numEvents * self.percentSuccess / 100
+        self.numEvents += 1
+        if successEvent:
+            numSuccess += 1
+        self.percentSuccess = 100 * numSuccess / self.numEvents
+
     def DetermineBurstPercent ( self ):
     # Calculates percentage of active cells that are currently bursting.
 
@@ -283,24 +292,38 @@ class Agent:
         else:
             learnRange = sequenceLength
 
-        self.tp.reset()
-        for idx in range( learnRange ):
-            # Learn sequence in tp back sequenceLength-time steps.
-            self.tp.compute( self.senseBuffer[ learnRange - idx - 1 ][ 0 ], learn = True )
-            self.tp.activateDendrites( learn = True )
-            winnerCellsTP = self.tp.getWinnerCells()
+        if self.ID == 'Left':
+            for buffEntry in self.senseBuffer:
+                if buffEntry[ 3 ]:
+                    for cell in buffEntry[ 2 ].sparse:
+                        for i in range( self.motorDimensions ):
+                            if i == buffEntry[ 1 ]:
+                                self.motorSynapse[ ( cell * self.motorDimensions ) + i ] += self.synapseInc * feeling
+                                if self.motorSynapse[ ( cell * self.motorDimensions ) + i ] > 1.0:
+                                    self.motorSynapse[ ( cell * self.motorDimensions ) + i ] = 1.0
+                            else:
+                                self.motorSynapse[ ( cell * self.motorDimensions ) + i ] -= self.synapseDec * feeling
+                                if self.motorSynapse[ ( cell * self.motorDimensions ) + i ] < 0.0:
+                                    self.motorSynapse[ ( cell * self.motorDimensions ) + i ] = 0.0
+        else:
+            self.tp.reset()
+            for idx in range( learnRange ):
+                # Learn sequence in tp back sequenceLength-time steps.
+                self.tp.compute( self.senseBuffer[ learnRange - idx - 1 ][ 0 ], learn = True )
+                self.tp.activateDendrites( learn = True )
+                winnerCellsTP = self.tp.getWinnerCells()
 
-            # Train motor connections based on winner cells and remembered winningMotor.
-            for cell in winnerCellsTP.sparse:
-                for i in range( self.motorDimensions ):
-                    if i == self.senseBuffer[ learnRange - idx - 1 ][ 1 ]:
-                        self.motorSynapse[ ( cell * self.motorDimensions ) + i ] += self.synapseInc * feeling
-                        if self.motorSynapse[ ( cell * self.motorDimensions ) + i ] > 1.0:
-                            self.motorSynapse[ ( cell * self.motorDimensions ) + i ] = 1.0
-                    else:
-                        self.motorSynapse[ ( cell * self.motorDimensions ) + i ] -= self.synapseDec * feeling
-                        if self.motorSynapse[ ( cell * self.motorDimensions ) + i ] < 0.0:
-                            self.motorSynapse[ ( cell * self.motorDimensions ) + i ] = 0.0
+                # Train motor connections based on winner cells and remembered winningMotor.
+                for cell in winnerCellsTP.sparse:
+                    for i in range( self.motorDimensions ):
+                        if i == self.senseBuffer[ learnRange - idx - 1 ][ 1 ]:
+                            self.motorSynapse[ ( cell * self.motorDimensions ) + i ] += self.synapseInc * feeling
+                            if self.motorSynapse[ ( cell * self.motorDimensions ) + i ] > 1.0:
+                                self.motorSynapse[ ( cell * self.motorDimensions ) + i ] = 1.0
+                        else:
+                            self.motorSynapse[ ( cell * self.motorDimensions ) + i ] -= self.synapseDec * feeling
+                            if self.motorSynapse[ ( cell * self.motorDimensions ) + i ] < 0.0:
+                                self.motorSynapse[ ( cell * self.motorDimensions ) + i ] = 0.0
 
     def Brain ( self, yPos, ballX, ballY, ballXSpeed, ballYSpeed ):
     # Agents brain center.
@@ -312,9 +335,6 @@ class Agent:
         self.tp.compute( senseSDR, learn = True )
         self.tp.activateDendrites( learn = True )
         winnerCellsTP = self.tp.getWinnerCells()
-
-        if self.DetermineBurstPercent() <= 5:
-            print("Less than 5% burst")
 
         motorScore = [ 0.0, 0.0, 0.0 ]         # Keeps track of each motor output weighted score [ UP, STILL, DOWN ]
         # Use active cells to determine motor action by feeding through motorSynapse.
@@ -330,7 +350,11 @@ class Agent:
         winningMotor = random.choice( largest )
 
         # Add senseSDR and winningMotor to buffer.
-        self.senseBuffer.insert( 0, [ senseSDR, winningMotor ] )
+        if self.DetermineBurstPercent() <= 1:
+            isPredicted = True
+        else:
+            isPredicted = False
+        self.senseBuffer.insert( 0, [ senseSDR, winningMotor, winnerCellsTP, isPredicted ] )
 
         if self.manualInput != -1:
             # If motor suggestion, manualInput, equals winningMotor then send a small reward.
@@ -351,20 +375,11 @@ rightAgent = Agent( 'Right' )
 
 # Functions
 def ReDrawScore():
-    if leftAgent.numEvents == 0:
-        leftPercent = 0.0
-    else:
-        leftPercent  = int( 100 * leftAgent.numSuccess / leftAgent.numEvents )
-    if rightAgent.numEvents == 0:
-        rightPercent = 0.0
-    else:
-        rightPercent = int( 100 * rightAgent.numSuccess / rightAgent.numEvents )
-
     pen.clear()
     pen.goto(0, 260)
     pen.write(
         "Left Agent: {}% on {} events".format(
-            leftPercent,
+            round( leftAgent.percentSuccess, 1 ),
             leftAgent.numEvents,
         ),
         align = "center", font = ("Courier", 24, "normal")
@@ -372,7 +387,7 @@ def ReDrawScore():
     pen.goto(0, 230)
     pen.write(
         "Right Agent: {}% on {} events".format(
-            rightPercent,
+            round( rightAgent.percentSuccess, 1 ),
             rightAgent.numEvents,
         ),
         align = "center", font = ("Courier", 24, "normal")
@@ -405,9 +420,10 @@ def paddle_b_down():
 def on_press( key ):
     if str(key) == ( 'Key.esc' ):
         quit()
-    elif str( key ) == ( 'w' ):
+    elif key.char == ( 'w' ):
         leftAgent.SendSuggest( 0 )
-    elif str( key ) == ( 's' ):
+        print("w pressed")
+    elif key.char == ( 's' ):
         leftAgent.SendSuggest( 2 )
 
 def on_release( key ):
@@ -442,7 +458,7 @@ while True:
         leftAgent.Clear()
         rightAgent.Clear()
 
-        rightAgent.numEvents += 1
+        rightAgent.UpdateScore( False )
         ReDrawScore()
 
         ball.goto(0, 0)
@@ -456,7 +472,7 @@ while True:
         leftAgent.Clear()
         rightAgent.Clear()
 
-        leftAgent.numEvents += 1
+        leftAgent.UpdateScore( False )
         ReDrawScore()
 
         ball.goto(0, 0)
@@ -470,8 +486,7 @@ while True:
         leftAgent.Clear()
         rightAgent.Clear()
 
-        leftAgent.numSuccess += 1
-        leftAgent.numEvents += 1
+        leftAgent.UpdateScore( True )
         ReDrawScore()
 
         ball.dx *= -1
@@ -483,8 +498,7 @@ while True:
         leftAgent.Clear()
         rightAgent.Clear()
 
-        rightAgent.numSuccess += 1
-        rightAgent.numEvents += 1
+        rightAgent.UpdateScore( True )
         ReDrawScore()
 
         ball.dx *= -1
