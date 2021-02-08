@@ -89,7 +89,7 @@ class Agent:
             synPermConnected           = 0.1,
             boostStrength              = 3.0,
             seed                       = -1,
-            wrapAround                 = True
+            wrapAround                 = False
         )
 
         self.tp = TemporalMemory(
@@ -113,17 +113,10 @@ class Agent:
             size = ( self.tp.getColumnDimensions()[ 0 ] * self.tp.getCellsPerColumn() * self.motorDimensions, )
         )
 
-        self.goalSynapse = numpy.random.uniform(
-            low = 0.0, high = 1.0,
-            size = ( self.tp.getColumnDimensions()[ 0 ] * self.tp.getColumnDimensions()[ 0 ], )
-        )
-
         self.manualInput = -1
 
         self.numEvents = 0
         self.percentSuccess = 0
-
-        self.goalEncoded = False
 
     def Clear ( self ):
     # Clear sense buffer.
@@ -269,18 +262,15 @@ class Agent:
             isPredicted = False
 
         # Add senseSDR and winningMotor to buffer.
-        if self.ID == 'Left':
-            self.senseBuffer.insert( 0, [ winningMotor, winnerCellsTP, True ] )
-        else:
-            self.senseBuffer.insert( 0, [ winningMotor, winnerCellsTP, isPredicted ] )
+        self.senseBuffer.insert( 0, [ winningMotor, winnerCellsTP, isPredicted ] )
 
-        if self.manualInput != -1:
-            # If motor suggestion, manualInput, equals winningMotor then send a small reward.
-            if winningMotor == self.manualInput:
-                self.Hippocampus( 0.1 )
-            # If not send a small punishment.
-            else:
-                self.Hippocampus( -0.1 )
+#        if self.manualInput != -1:
+#            # If motor suggestion, manualInput, equals winningMotor then send a small reward.
+#            if winningMotor == self.manualInput:
+#                self.Hippocampus( 0.1 )
+#            # If not send a small punishment.
+#            else:
+#                self.Hippocampus( -0.1 )
 
         # Return winning motor function.
         return winningMotor

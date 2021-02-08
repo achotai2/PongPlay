@@ -157,7 +157,8 @@ while True:
     # Border checking left and right.
     if ball.xcor() > 350:
         # Ball falls off right side of screen. A gets a point.
-        p = -( numpy.arctan( ( numpy.absolute( paddle_b.ycor() - ball.ycor() ) - ( screenHeight / 2 ) ) / 10 ) / numpy.pi ) - 0.5
+        p = 1.0 - ( numpy.absolute( paddle_b.ycor() - ball.ycor() ) / screenHeight )
+        print(p)
         rightAgent.Hippocampus( p )
         leftAgent.Clear()
         rightAgent.Clear()

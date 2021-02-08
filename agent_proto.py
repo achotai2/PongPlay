@@ -14,17 +14,17 @@ from htm.bindings.algorithms import Classifier
 
 class AgentProto:
 
-    testThreshold   = 30
-    burstThreshold  = 5
+    testThreshold   = 35
+    burstThreshold  = 50
     goalThreshold   = 1.0
     motorDimensions = 3
-    synapseInc      = 0.05
-    synapseDec      = 0.01
+    synapseInc      = 0.5
+    synapseDec      = 0.1
 
     def __init__( self, name, screenHeight, screenWidth ):
         self.ID = name
 
-        self.senseBuffer = []       # Memory of all [ senseSDR, winningMotor ] experienced this sequence.
+        self.senseBuffer = []       # Memory of all winner motor cells experienced since last event.
 
         # Set up encoder parameters
         paddleEncodeParams    = ScalarEncoderParameters()
@@ -61,7 +61,7 @@ class AgentProto:
         manInEncodeParams.activeBits = 10
         manInEncodeParams.radius     = 1
         manInEncodeParams.clipInput  = False
-        manInEncodeParams.minimum    = -1
+        manInEncodeParams.minimum    = 0
         manInEncodeParams.maximum    = 2
         manInEncodeParams.periodic   = False
 
@@ -89,7 +89,7 @@ class AgentProto:
             synPermConnected           = 0.1,
             boostStrength              = 3.0,
             seed                       = -1,
-            wrapAround                 = True
+            wrapAround                 = False
         )
 
         self.tp = TemporalMemory(
@@ -108,44 +108,43 @@ class AgentProto:
             seed                      = 42
         )
 
-        self.motorSynapse = numpy.random.uniform(
-            low = 0.0, high = 1.0,
-            size = ( self.tp.getColumnDimensions()[ 0 ] * self.tp.getCellsPerColumn() * self.motorDimensions, )
-        )
-
-        self.goalSynapse = numpy.random.uniform(
-            low = 0.0, high = 1.0,
-            size = ( self.tp.getColumnDimensions()[ 0 ] * self.tp.getColumnDimensions()[ 0 ], )
-        )
-
-        self.manualInput = -1
+#        self.manualInput = -1
 
         self.numEvents = 0
         self.percentSuccess = 0
 
-        self.goalEncoded = False
+        self.cellToWinningMotor = [ -1 ] * self.tp.getColumnDimensions()[ 0 ] * self.tp.getCellsPerColumn()
+        self.cellToScore        = [ 0 ] * self.tp.getColumnDimensions()[ 0 ] * self.tp.getCellsPerColumn()
+        self.cellToNumEvents    = [ 0 ] * self.tp.getColumnDimensions()[ 0 ] * self.tp.getCellsPerColumn()
 
     def Clear ( self ):
     # Clear sense buffer.
         self.senseBuffer.clear()
         self.tp.reset()
 
-
     def SendSuggest ( self, input ):
     # Sets the movement suggestion from user. manualInput = -1 means no suggestion.
         self.manualInput = input
         self.tp.reset()
 
-    def EncodeSenseData ( self, yPos, ballX, ballY, ballXSpeed, ballYSpeed ):
+    def EncodeSenseData ( self, yPos, ballX, ballY, ballXSpeed, ballYSpeed, motorInput, senseInput ):
     # Encodes sense data as an SDR and returns it.
 
         # Now we call the encoders to create bit representations for each value, and encode them.
-        paddleBits   = self.paddleEncoder.encode( yPos )
-        ballBitsX    = self.ballEncoderX.encode( ballX )
-        ballBitsY    = self.ballEncoderY.encode( ballY )
-        ballBitsVelX = self.ballEncoderVelX.encode( ballXSpeed )
-        ballBitsVelY = self.ballEncoderVelY.encode( ballYSpeed )
-        manInBits    = self.manInEncoder.encode( self.manualInput )
+        if senseInput:
+            paddleBits   = self.paddleEncoder.encode( yPos )
+            ballBitsX    = self.ballEncoderX.encode( ballX )
+            ballBitsY    = self.ballEncoderY.encode( ballY )
+            ballBitsVelX = self.ballEncoderVelX.encode( ballXSpeed )
+            ballBitsVelY = self.ballEncoderVelY.encode( ballYSpeed )
+            manInBits    = SDR( self.manInEncoder.size )
+        else:
+            paddleBits   = SDR( self.paddleEncoder.size )
+            ballBitsX    = SDR( self.ballEncoderX.size )
+            ballBitsY    = SDR( self.ballEncoderY.size )
+            ballBitsVelX = SDR( self.ballEncoderVelX.size )
+            ballBitsVelY = SDR( self.ballEncoderVelY.size )
+            manInBits    = self.manInEncoder.encode( motorInput )
 
         # Concatenate all these encodings into one large encoding for Spatial Pooling.
         encoding = SDR( self.encodingWidth ).concatenate( [ paddleBits, ballBitsX, ballBitsY, ballBitsVelX, ballBitsVelY, manInBits ] )
@@ -154,7 +153,6 @@ class AgentProto:
 
         return senseSDR
 
-    # NOT USED CURRENTLY
     def Overlap ( self, SDR1, SDR2 ):
     # Computes overlap score between two passed SDRs.
 
@@ -166,7 +164,6 @@ class AgentProto:
 
         return overlap
 
-    # NOT USED CURRENTLY
     def GreatestOverlap ( self, testSDR, listSDR, threshold ):
     # Finds SDR in listSDR with greatest overlap with testSDR and returns it, and its index in the list.
     # If none are found above threshold or if list is empty it returns an empty SDR of length testSDR, with index -1.
@@ -182,9 +179,9 @@ class AgentProto:
                     if idx != 0:
                         thisOverlap = self.Overlap( testSDR, checkSDR )
                         if thisOverlap >= threshold:
-                            aboveThreshold.append( [ thisOverlap, [checkSDR, idx] ] )
+                            aboveThreshold.append( [ thisOverlap, [ checkSDR, idx ] ] )
                 if len( aboveThreshold ) > 0:
-                    greatest = sorted( aboveThreshold, key = lambda tup: tup[0], reverse = True )[ 0 ][ 1 ]
+                    greatest = sorted( aboveThreshold, key = lambda tup: tup[ 0 ], reverse = True )[ 0 ][ 1 ]
 
         return greatest
 
@@ -225,62 +222,54 @@ class AgentProto:
         if feeling > 1.0 or feeling < -1.0:
             sys.exit( "Feeling states should be in the range [-1.0, 1.0]" )
 
-        for buffEntry in self.senseBuffer:
-            if buffEntry[ 2 ]:
-                for cell in buffEntry[ 1 ].sparse:
-                    for i in range( self.motorDimensions ):
-                        if i == buffEntry[ 0 ]:
-                            self.motorSynapse[ ( cell * self.motorDimensions ) + i ] += self.synapseInc * feeling
-                            if self.motorSynapse[ ( cell * self.motorDimensions ) + i ] > 1.0:
-                                self.motorSynapse[ ( cell * self.motorDimensions ) + i ] = 1.0
-                        else:
-                            self.motorSynapse[ ( cell * self.motorDimensions ) + i ] -= self.synapseDec * feeling
-                            if self.motorSynapse[ ( cell * self.motorDimensions ) + i ] < 0.0:
-                                self.motorSynapse[ ( cell * self.motorDimensions ) + i ] = 0.0
+        for buffElement in self.senseBuffer:
+            for winnerCell in buffElement[ 0 ].sparse:
+                self.cellToWinningMotor[ winnerCell ] = buffElement[ 1 ]
+                self.cellToNumEvents[ winnerCell ] += 1
+                self.cellToScore[ winnerCell ] += feeling
 
     def Brain ( self, yPos, ballX, ballY, ballXSpeed, ballYSpeed ):
     # Agents brain center.
 
         # Generate SDR for sense data by feeding sense data into SP with learning.
-        senseSDR = self.EncodeSenseData( yPos, ballX, ballY, ballXSpeed, ballYSpeed )
+        senseSDR = self.EncodeSenseData( yPos, ballX, ballY, ballXSpeed, ballYSpeed, 0, True )
 
         # Feed present senseSDR into tp and generate active cells.
+        self.tp.reset()
         self.tp.compute( senseSDR, learn = True )
         self.tp.activateDendrites( learn = True )
-        winnerCellsTP = self.tp.getWinnerCells()
+        predictCellsTP = self.tp.getPredictiveCells()
 
         motorScore = [ 0.0, 0.0, 0.0 ]         # Keeps track of each motor output weighted score [ UP, STILL, DOWN ]
-        # Use active cells to determine motor action by feeding through motorSynapse.
-        for cell in winnerCellsTP.sparse:
-            for i in range( self.motorDimensions ):
-                motorScore[i] += self.motorSynapse[ ( cell * self.motorDimensions ) + i ]
+        # Get success percent score for each predicted cell and add it to appropriate motor action.
+        for motorCell in predictCellsTP.sparse:
+            if self.cellToWinningMotor[ motorCell ] != -1:
+                motorScore[ self.cellToWinningMotor[ motorCell ] ] += self.cellToScore[ motorCell ] / self.cellToNumEvents[ motorCell ]
+        for i in range( self.motorDimensions ):
+            if motorScore[ i ] == 0.0:
+                # If we've never seen this motor action before there is some probability of seeing it this time.
+                motorScore[ i ] = 1.0
 
-        # Use largest motorScore to choose winningMotor action.
-        largest = []
-        for i, v in enumerate( motorScore ):
-            if sorted( motorScore, reverse=True )[ 0 ] == v:
-                largest.append( i )                                         # 0 = UP, 1 = STILL, 2 = DOWN
-        winningMotor = random.choice( largest )
+        # Normalize motor score and use it as a weighted probability to choose winningMotor.
+        normMotorScore = [ float( ii ) / sum( motorScore ) for ii in motorScore ]
+        winningMotor = random.choices( [ 0, 1, 2 ], weights = normMotorScore, k = 1 )[ 0 ]
 
-        # Determine if cells are bursting above some percent threshold or not.
-        if self.DetermineBurstPercent() <= self.burstThreshold:
-            isPredicted = True
-        else:
-            isPredicted = False
+        # Feed in motor activity.
+        senseSDR = self.EncodeSenseData( 0, 0, 0, 0, 0, winningMotor, False )
+        self.tp.compute( senseSDR, learn = True )
+        self.tp.activateDendrites( learn = True )
+        winnerMotorCellsTP = self.tp.getWinnerCells()
 
         # Add senseSDR and winningMotor to buffer.
-        if self.ID == 'Left':
-            self.senseBuffer.insert( 0, [ winningMotor, winnerCellsTP, True ] )
-        else:
-            self.senseBuffer.insert( 0, [ winningMotor, winnerCellsTP, isPredicted ] )
+        self.senseBuffer.insert( 0, [ winnerMotorCellsTP, winningMotor ] )
 
-        if self.manualInput != -1:
-            # If motor suggestion, manualInput, equals winningMotor then send a small reward.
-            if winningMotor == self.manualInput:
-                self.Hippocampus( 0.1 )
-            # If not send a small punishment.
-            else:
-                self.Hippocampus( -0.1 )
+#        if self.manualInput != -1:
+#            # If motor suggestion, manualInput, equals winningMotor then send a small reward.
+#            if winningMotor == self.manualInput:
+#                self.Hippocampus( 0.1 )
+#            # If not send a small punishment.
+#            else:
+#                self.Hippocampus( -0.1 )
 
         # Return winning motor function.
         return winningMotor
