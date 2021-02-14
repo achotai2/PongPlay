@@ -11,8 +11,9 @@ from htm.bindings.algorithms import Classifier
 class BallAgent:
 
     motorDimensions = 3
-    synapseInc      = 0.5
-    synapseDec      = 0.1
+
+    localDimX = 100
+    localDimY = 100
 
     def __init__( self, name, screenHeight, screenWidth ):
 
@@ -30,29 +31,29 @@ class BallAgent:
         localXEncodeParams.activeBits = 21
         localXEncodeParams.radius     = 20
         localXEncodeParams.clipInput  = False
-        localXEncodeParams.minimum    = -50
-        localXEncodeParams.maximum    = 50
+        localXEncodeParams.minimum    = -int( self.localDimX / 2 )
+        localXEncodeParams.maximum    = int( self.localDimX / 2 )
         localXEncodeParams.periodic   = False
 
         localYEncodeParams.activeBits = 21
         localYEncodeParams.radius     = 20
         localYEncodeParams.clipInput  = False
-        localYEncodeParams.minimum    = -50
-        localYEncodeParams.maximum    = 50
+        localYEncodeParams.minimum    = -int( self.localDimY / 2 )
+        localYEncodeParams.maximum    = int( self.localDimY / 2 )
         localYEncodeParams.periodic   = False
 
         ballXEncodeParams.activeBits = 5
         ballXEncodeParams.radius     = 20
         ballXEncodeParams.clipInput  = False
-        ballXEncodeParams.minimum    = -screenWidth / 2
-        ballXEncodeParams.maximum    = screenWidth / 2
+        ballXEncodeParams.minimum    = -int( screenWidth / 2 )
+        ballXEncodeParams.maximum    = int( screenWidth / 2 )
         ballXEncodeParams.periodic   = False
 
         ballYEncodeParams.activeBits = 5
         ballYEncodeParams.radius     = 20
         ballYEncodeParams.clipInput  = False
-        ballYEncodeParams.minimum    = -screenHeight / 2
-        ballYEncodeParams.maximum    = screenHeight / 2
+        ballYEncodeParams.minimum    = -int( screenHeight / 2 )
+        ballYEncodeParams.maximum    = int( screenHeight / 2 )
         ballYEncodeParams.periodic   = False
 
         # Set up encoders
@@ -118,21 +119,29 @@ class BallAgent:
 
         return senseSDR
 
+    def Within ( self, value, minimum, maximum ):
+    # Checks if value is <= maximum and >= minimum.
+
+        if value <= maximum and value >= minimum:
+            return True
+        else:
+            return False
+
     def LearnTimeStep ( self, secondLast, last, present, doLearn ):
     # Learn the three time-step data, from second last to last to present, centered around last time-step.
 
         self.tp.reset()
 
-        if secondLast[ 0 ] - last[ 0 ] <= 100 and secondLast[ 0 ] - last[ 0 ] >= -100 and secondLast[ 1 ] - last[ 1 ] <= 100 and secondLast[ 1 ] - last[ 1 ] >= -100:
+        if self.Within( secondLast[ 0 ] - last[ 0 ], -self.localDimX, self.localDimX ) and self.Within( secondLast[ 1 ] - last[ 1 ], -self.localDimY, self.localDimY ):
             secondLastSDR = self.EncodeSenseData( secondLast[ 0 ] - last[ 0 ], secondLast[ 1 ] - last[ 1 ], last[ 0 ], last[ 1 ] )
 
             # Feed x and y position into classifier to learn.
             # Classifier can only take positive input, so need to transform ball origin.
             if doLearn:
-                self.xPosition.learn( pattern = secondLastSDR, classification = secondLast[ 0 ] - last[ 0 ] + 50 )
-                self.yPosition.learn( pattern = secondLastSDR, classification = secondLast[ 1 ] - last[ 1 ] + 50 )
+                self.xPosition.learn( pattern = secondLastSDR, classification = secondLast[ 0 ] - last[ 0 ] + int( self.localDimX / 2 ) )
+                self.yPosition.learn( pattern = secondLastSDR, classification = secondLast[ 1 ] - last[ 1 ] + int( self.localDimY / 2 ) )
 
-            # Reset tp and feed SDR into tp.
+            # Feed SDR into tp.
             self.tp.compute( secondLastSDR, learn = doLearn )
             self.tp.activateDendrites( learn = doLearn )
 
@@ -140,19 +149,19 @@ class BallAgent:
         lastSDR = self.EncodeSenseData( 0, 0, last[ 0 ], last[ 1 ] )
 
         if doLearn:
-            self.xPosition.learn( pattern = lastSDR, classification = 50 )
-            self.yPosition.learn( pattern = lastSDR, classification = 50 )
+            self.xPosition.learn( pattern = lastSDR, classification = int( self.localDimX / 2 ) )
+            self.yPosition.learn( pattern = lastSDR, classification = int( self.localDimY / 2 ) )
 
         self.tp.compute( lastSDR, learn = doLearn )
         self.tp.activateDendrites( learn = doLearn )
 
-        if present[ 0 ] - last[ 0 ] <= 100 and present[ 0 ] - last[ 0 ] >= -100 and present[ 1 ] - last[ 1 ] <= 100 and present[ 1 ] - last[ 1 ] >= -100:
+        if self.Within( present[ 0 ] - last[ 0 ], -self.localDimX, self.localDimX ) and self.Within( present[ 1 ] - last[ 1 ], -self.localDimY, self.localDimY ):
             # Generate SDR for last sense data by feeding sense data into SP with learning.
             senseSDR = self.EncodeSenseData( present[ 0 ] - last[ 0 ], present[ 1 ] - last[ 1 ], last[ 0 ], last[ 1 ] )
 
             if doLearn:
-                self.xPosition.learn( pattern = senseSDR, classification = present[ 0 ] - last[ 0 ] + 50 )
-                self.yPosition.learn( pattern = senseSDR, classification = present[ 1 ] - last[ 1 ] + 50 )
+                self.xPosition.learn( pattern = senseSDR, classification = present[ 0 ] - last[ 0 ] + int( self.localDimX / 2 ) )
+                self.yPosition.learn( pattern = senseSDR, classification = present[ 1 ] - last[ 1 ] + int( self.localDimY / 2 ) )
 
             self.tp.compute( senseSDR, learn = doLearn )
             self.tp.activateDendrites( learn = doLearn )
@@ -162,7 +171,7 @@ class BallAgent:
 
         self.tp.reset()
 
-        if secondLast[ 0 ] - last[ 0 ] <= 100 and secondLast[ 0 ] - last[ 0 ] >= -100 and secondLast[ 1 ] - last[ 1 ] <= 100 and secondLast[ 1 ] - last[ 1 ] >= -100:
+        if self.Within( secondLast[ 0 ] - last[ 0 ], -self.localDimX, self.localDimX ) and self.Within( secondLast[ 1 ] - last[ 1 ], -self.localDimY, self.localDimY ):
             secondLastSDR = self.EncodeSenseData( secondLast[ 0 ] - last[ 0 ], secondLast[ 1 ] - last[ 1 ], last[ 0 ], last[ 1 ] )
             self.tp.compute( secondLastSDR, learn = doLearn )
             self.tp.activateDendrites( learn = doLearn )
@@ -175,8 +184,8 @@ class BallAgent:
         # Get predicted location for next time step.
         stepSenseSDR = SDR( self.sp.getColumnDimensions() )
         stepSenseSDR.sparse = numpy.unique( [ self.tp.columnForCell( cell ) for cell in predictCellsTP.sparse ] )
-        positionX = numpy.argmax( self.xPosition.infer( pattern = stepSenseSDR ) ) - 50
-        positionY = numpy.argmax( self.yPosition.infer( pattern = stepSenseSDR ) ) - 50
+        positionX = numpy.argmax( self.xPosition.infer( pattern = stepSenseSDR ) ) - int( self.localDimX / 2 )
+        positionY = numpy.argmax( self.yPosition.infer( pattern = stepSenseSDR ) ) - int( self.localDimY / 2 )
 
         return [ last[ 0 ] + positionX, last[ 1 ] + positionY ]
 
@@ -197,12 +206,9 @@ class BallAgent:
         # Predict next 10 time step locations and store them.
         for step in range( 10 ):
             nextPosition = self.PredictTimeStep( predPositions[ -2 ], predPositions[ -1 ], False )
-            if nextPosition[ 0 ] <= self.screenWidth / 2 and nextPosition[ 0 ] >= -self.screenWidth / 2 and nextPosition[ 1 ] <= self.screenHeight / 2 and nextPosition[ 1 ] >= -self.screenHeight / 2:
+            if self.Within( nextPosition[ 0 ], -self.screenWidth / 2, self.screenWidth / 2 ) and self.Within( nextPosition[ 1 ], -self.screenHeight / 2, self.screenHeight / 2 ):
                 predPositions.append( nextPosition )
             else:
-                print(nextPosition)
                 break
-
-        print(predPositions)
 
         return predPositions
