@@ -6,8 +6,6 @@ import datetime
 import numpy
 import yaml
 import random
-import time
-from pynput import keyboard
 
 from agent_main import Agent
 from agent_proto import AgentProto
