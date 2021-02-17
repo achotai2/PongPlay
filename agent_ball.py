@@ -12,15 +12,19 @@ class BallAgent:
 
     motorDimensions = 3
 
-    localDimX = 100
-    localDimY = 100
+    resolutionX = 50
+    resolutionY = 50
 
-    def __init__( self, name, screenHeight, screenWidth ):
+    def __init__( self, name, screenHeight, screenWidth, ballHeight, ballWidth, paddleHeight, paddleWidth ):
 
         self.ID = name
 
         self.screenHeight = screenHeight
         self.screenWidth  = screenWidth
+        self.ballHeight   = ballHeight
+        self.ballWidth    = ballWidth
+        self.paddleHeight = paddleHeight
+        self.paddleWidth  = paddleWidth
 
         # Set up encoder parameters
         localXEncodeParams    = ScalarEncoderParameters()
@@ -28,32 +32,34 @@ class BallAgent:
         ballXEncodeParams     = ScalarEncoderParameters()
         ballYEncodeParams     = ScalarEncoderParameters()
 
-        localXEncodeParams.activeBits = 21
-        localXEncodeParams.radius     = 20
+        # Encodes center position of attention screen.
+        localXEncodeParams.activeBits = 5
+        localXEncodeParams.radius     = 5
         localXEncodeParams.clipInput  = False
-        localXEncodeParams.minimum    = -int( self.localDimX / 2 )
-        localXEncodeParams.maximum    = int( self.localDimX / 2 )
+        localXEncodeParams.minimum    = -int( screenWidth / 2 )
+        localXEncodeParams.maximum    = int( screenWidth / 2 )
         localXEncodeParams.periodic   = False
 
-        localYEncodeParams.activeBits = 21
-        localYEncodeParams.radius     = 20
+        localYEncodeParams.activeBits = 5
+        localYEncodeParams.radius     = 5
         localYEncodeParams.clipInput  = False
-        localYEncodeParams.minimum    = -int( self.localDimY / 2 )
-        localYEncodeParams.maximum    = int( self.localDimY / 2 )
+        localYEncodeParams.minimum    = -int( screenHeight / 2 )
+        localYEncodeParams.maximum    = int( screenHeight / 2 )
         localYEncodeParams.periodic   = False
 
-        ballXEncodeParams.activeBits = 5
-        ballXEncodeParams.radius     = 20
-        ballXEncodeParams.clipInput  = False
-        ballXEncodeParams.minimum    = -int( screenWidth / 2 )
-        ballXEncodeParams.maximum    = int( screenWidth / 2 )
+        # Encodes position of ball within local attention screen.
+        ballXEncodeParams.activeBits = ( self.ballWidth * 20 ) + 1
+        ballXEncodeParams.radius     = ( self.ballWidth * 20 )
+        ballXEncodeParams.clipInput  = True
+        ballXEncodeParams.minimum    = -int( self.localDimX / 2 )
+        ballXEncodeParams.maximum    = int( self.localDimX / 2 )
         ballXEncodeParams.periodic   = False
 
-        ballYEncodeParams.activeBits = 5
-        ballYEncodeParams.radius     = 20
-        ballYEncodeParams.clipInput  = False
-        ballYEncodeParams.minimum    = -int( screenHeight / 2 )
-        ballYEncodeParams.maximum    = int( screenHeight / 2 )
+        ballYEncodeParams.activeBits = ( self.ballHeight * 20 ) + 1
+        ballYEncodeParams.radius     = ( self.ballHeight * 20 )
+        ballYEncodeParams.clipInput  = True
+        ballYEncodeParams.minimum    = -int( self.localDimY / 2 )
+        ballYEncodeParams.maximum    = int( self.localDimY / 2 )
         ballYEncodeParams.periodic   = False
 
         # Set up encoders
@@ -103,14 +109,26 @@ class BallAgent:
         self.lastData       = [ 0, 0 ]
         self.secondLastData = [ 0, 0 ]
 
-    def EncodeSenseData ( self, localX, localY, ballX, ballY ):
+    def Within ( self, value, minimum, maximum ):
+    # Checks if value is <= maximum and >= minimum.
+
+        if value <= maximum and value >= minimum:
+            return True
+        else:
+            return False
+
+    def EncodeSenseData ( self, localCenterX, localCenterY, ballX, ballY ):
     # Encodes sense data as an SDR and returns it.
 
         # Now we call the encoders to create bit representations for each value, and encode them.
-        localBitsX   = self.localEncoderX.encode( localX )
-        localBitsY   = self.localEncoderY.encode( localY )
-        ballBitsX    = self.ballEncoderX.encode( ballX )
-        ballBitsY    = self.ballEncoderY.encode( ballY )
+        localBitsX   = self.localEncoderX.encode( localCenterX )
+        localBitsY   = self.localEncoderY.encode( localCenterY )
+        if self.Within( ballX - localCenterX, -self.localDimX / 2, self.localDimX / 2 ) and self.Within( ballY - localCenterY, -self.localDimY / 2, self.localDimY / 2 ):
+            ballBitsX = self.ballEncoderX.encode( ballX )
+            ballBitsY = self.ballEncoderY.encode( ballY )
+        else:
+            ballBitsX = SDR( self.ballEncoderX.size )
+            ballBitsY = SDR( self.ballEncoderY.size )
 
         # Concatenate all these encodings into one large encoding for Spatial Pooling.
         encoding = SDR( self.encodingWidth ).concatenate( [ localBitsX, localBitsY, ballBitsX, ballBitsY ] )
@@ -119,13 +137,91 @@ class BallAgent:
 
         return senseSDR
 
-    def Within ( self, value, minimum, maximum ):
-    # Checks if value is <= maximum and >= minimum.
+    def BuildLocalBitRep( self, localDimX, localDimY, centerX, centerY, ballX, ballY ):
+    # Builds a bit-rep SDR of localDim dimensions centered around point with resolution.
 
-        if value <= maximum and value >= minimum:
-            return True
-        else:
-            return False
+        localBitRep = []
+
+        scaleX = localDimX / self.resolutionX
+        scaleY = localDimY / self.resolutionY
+
+        if scaleX < 1 or scaleY < 1:
+            sys.exit( "Resolution (X and Y) must be less than local dimensions (X and Y)." )
+
+        # Right side border bits.
+        if centerX + ( localDimX / 2 ) >= ( self.screenWidth / 2 ):
+            for y in range( self.resolutionY ):
+                localBitRep.append( int( ( ( self.screenWidth / 2 ) - centerX + ( localDimX / 2 ) ) / scaleX ) + ( y * self.resolutionX ) )
+
+        # Left side border bits.
+        if centerX - ( localDimX / 2 ) <= -( self.screenWidth / 2 ):
+            for y in range( self.resolutionY ):
+                localBitRep.append( int( ( -( self.screenWidth / 2 ) - centerX + ( localDimX / 2 ) ) / scaleX ) + ( y * self.resolutionX ) )
+
+        # Top side border bits.
+        if centerY + ( localDimX / 2 ) >= ( self.screenHeight / 2 ):
+            for x in range( self.resolutionX ):
+                localBitRep.append( x + ( int( ( (self.screenHeight / 2 ) - centerY + ( localDimY / 2 ) ) / scaleY ) * self.resolutionX ) )
+
+        # Bottom side border bits.
+        if centerY - ( localDimX / 2 ) <= -( self.screenHeight / 2 ):
+            for x in range( self.resolutionX ):
+                localBitRep.append( x + ( int( ( -(self.screenHeight / 2 ) - centerY + ( localDimY / 2 ) ) / scaleY ) * self.resolutionX ) )
+
+        # Ball bits.
+        if self.Within( ballX, centerX - ( localDimX / 2 ) - ( self.ballWidth * 10 ), centerX + ( localDimX / 2 ) + ( self.ballWidth * 10 ) ) and self.Within( ballY, centerY - ( localDimY / 2 ) - ( self.ballHeight * 10 ), centerY + ( localDimY / 2 ) + ( self.ballHeight * 10 ) ):
+            for x in range( self.ballWidth * 20 ):
+                for y in range( self.ballHeight * 20 ):
+                    if self.Within( ballX - ( self.ballWidth * 10 ) + x, centerX - ( localDimX / 2 ), centerX + ( localDimX / 2 ) ) and self.Within( ballY - ( self.ballHeight * 10 ) + y, centerY - ( localDimY / 2 ), centerY + ( localDimY / 2 ) ):
+                        bitX = ballX - ( self.ballWidth * 10 ) + x - centerX + ( localDimX / 2 )
+                        bitY = ballY - ( self.ballHeight * 10 ) + y - centerY + ( localDimY / 2 )
+                        localBitRep.append( int( bitX / scaleX ) + ( int( bitY / scaleY ) * self.resolutionX ) )
+
+#        # Build unscaled bit representation.resolution
+#        for x in range( localDimX ):
+#            for y in range( localDimY ):
+#                # Look if element at this position is in bitRep.
+#                if x + centerX + int( bitRepDimX / 2 ) - int( localDimX / 2 ) + ( ( y + centerY + int( bitRepDimY / 2 ) - int( localDimY / 2 ) ) * bitRepDimX ) in bitRep:
+#                    localBitRep.append( x + ( y * localDimX ) )
+
+        # Scale bit representation to fit requested dimension.
+#        scaleX = int( localDimX / self.resolutionX )
+#        scaleY = int( localDimY / self.resolutionY )
+
+#        localScaledBitRep = []
+
+#        if scaleX > 1:
+#            for x in range( self.resolutionX ):
+#                for y in range ( self.resolutionY ):
+#                    inSquare = False
+#                    for sx in range( scaleX ):
+#                        for sy in range( scaleY ):
+#                            if sx + ( x * scaleX ) + ( ( sy + ( y * scaleY ) * localDimY ) ) in localBitRep:
+#                                inSquare = True
+#                    if inSquare == True:
+#                        localScaledBitRep.append( x + ( y * self.resolutionX ) )
+
+        print("----------------------------------------------------------------")
+
+        whatPrintX   = self.resolutionX
+        whatPrintY   = self.resolutionY
+        whatPrintRep = localBitRep
+
+        for y in range( whatPrintY ):
+            for x in range( whatPrintX ):
+                if x == whatPrintX - 1:
+                    print ("ENDO")
+                    endRep = "\n"
+                else:
+                    endRep = ""
+                    if x + (y * whatPrintX ) in whatPrintRep:
+                        print(1, end=endRep)
+                    else:
+                        print(0, end=endRep)
+
+        bitRepSDR = SDR( self.resolutionX * self.resolutionY )
+        bitRepSDR.sparse = numpy.unique( localBitRep )
+        return bitRepSDR
 
     def LearnTimeStep ( self, secondLast, last, present, doLearn ):
     # Learn the three time-step data, from second last to last to present, centered around last time-step.
@@ -191,6 +287,8 @@ class BallAgent:
 
     def Brain ( self, ballX, ballY ):
     # Agents brain center.
+
+        self.BuildLocalBitRep( 100, 100, ballX, ballY, ballX, ballY )
 
         self.LearnTimeStep( self.secondLastData, self.lastData, [ ballX, ballY ], True )
 

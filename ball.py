@@ -13,10 +13,7 @@ from agent_ball import BallAgent
 screenWidth  = 800
 screenHeight = 600
 
-# Create play agents
-ballAgent = BallAgent( 'BallAgent', screenHeight, screenWidth )
-
-# Set up Turtle screen
+# Set up Turtle screen stuff----------------------------------------------------
 import turtle
 
 wn = turtle.Screen()
@@ -74,30 +71,20 @@ for i in range( 10 ):
     currPlaceDraw.goto( 0, 0 )
     placeCellsDraw.append( currPlaceDraw )
 
-def CreateBitRep():
-# Create a bit representation of entire screen. This is a list that stores the indices of ON bits.
+# Create play agents------------------------------------------------------------
+ballAgent = BallAgent( 'BallAgent', screenHeight, screenWidth, ballHeight, ballWidth, paddleHeight, paddleWidth )
 
-    screenBitRep = []
+# Functions---------------------------------------------------------------------
+def Within ( value, minimum, maximum ):
+# Checks if value is <= maximum and >= minimum.
 
-    # Ball bits.
-    for y in range( -ballHeight * 10, ballHeight * 10 ):
-        for x in range( -ballWidth * 10, ballWidth * 10 ):
-            screenBitRep.append( int( ball.xcor() + ( screenWidth / 2 ) + x + ( ( ball.ycor() + ( screenHeight / 2 ) + y ) * screenWidth ) ) )
-
-    # Paddle A bits.
-    for y in range( -paddleHeight * 10, paddleHeight * 10 ):
-        for x in range( -paddleWidth * 10, paddleWidth * 10 ):
-            screenBitRep.append( int( paddle_a.xcor() + ( screenWidth / 2 ) + x + ( ( paddle_a.ycor() + ( screenHeight / 2 ) + y ) * screenWidth ) ) )
-
-    # Paddle B bits.
-    for y in range( -paddleHeight * 10, paddleHeight * 10 ):
-        for x in range( -paddleWidth * 10, paddleWidth * 10 ):
-            screenBitRep.append( int( paddle_b.xcor() + ( screenWidth / 2 ) + x + ( ( paddle_b.ycor() + ( screenHeight / 2 ) + y ) * screenWidth ) ) )
-
-    return numpy.unique( screenBitRep )
+    if value <= maximum and value >= minimum:
+        return True
+    else:
+        return False
 
 while True:
-# Main game loop
+# Main game loop----------------------------------------------------------------
 
     wn.update()         # Screen update
 
@@ -106,24 +93,24 @@ while True:
     ball.sety( ball.ycor() + ball.dy )
 
     # Border checking top and bottom.
-    if ball.ycor() > 290:
-        ball.sety( 290 )
+    if ball.ycor() > int( screenHeight / 2 ) - ( ballHeight * 10 ):
+        ball.sety( int( screenHeight / 2 ) - ( ballHeight * 10 ) )
         ball.dy *= -1
 
-    elif ball.ycor() < -290:
-        ball.sety( -290 )
+    elif ball.ycor() < -int( screenHeight / 2 ) + ( ballHeight * 10 ):
+        ball.sety( -int( screenHeight / 2 ) + ( ballHeight * 10 ) )
         ball.dy *= -1
 
     # Border checking left and right.
-    if ball.xcor() > 350:
+    if ball.xcor() > int( screenWidth / 2 ) - ( ballWidth * 10 ):
 #        ball.goto(0, 0)
-        ball.setx( 350 )
+        ball.setx( int( screenWidth / 2 ) - ( ballWidth * 10 ) )
         ball.dx *= -1
 #        ball.dy *= random.choice( [ -1, 1 ] )
 
-    elif ball.xcor() < -350:
+    elif ball.xcor() < -int( screenWidth / 2 ) + ( ballWidth * 10 ):
 #        ball.goto(0, 0)
-        ball.setx( -350 )
+        ball.setx( -int( screenWidth / 2 ) + ( ballWidth * 10 ) )
         ball.dx *= -1
 #        ball.dy *= random.choice( [ -1, 1 ] )
 
@@ -138,8 +125,7 @@ while True:
 #        ball.dx *= -1
 #        ball.goto( 340, ball.ycor() )
 
-    # Run each agents learning algorithm and produce movement.
-    CreateBitRep()
+    # Run each agents learning algorithm and produce predictions.
     predPositions = ballAgent.Brain( ball.xcor(), ball.ycor() )
 
     for i in range( 10 ):
