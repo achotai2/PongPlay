@@ -60,8 +60,9 @@ paddle_b.penup()
 paddle_b.goto( 350, 240 )
 
 # Set up pred locations.
+drawLength = 20
 placeCellsDraw = []
-for i in range( 10 ):
+for i in range( drawLength ):
     currPlaceDraw = turtle.Turtle( )
     currPlaceDraw.speed( 0 )
     currPlaceDraw.shape( "circle" )
@@ -126,9 +127,12 @@ while True:
 #        ball.goto( 340, ball.ycor() )
 
     # Run each agents learning algorithm and produce predictions.
-    predPositions = ballAgent.Brain( ball.xcor(), ball.ycor() )
+    ballAgent.Brain( ball.xcor(), ball.ycor() )
 
-    for i in range( 10 ):
-        if i <= len( predPositions ) - 1:
-            placeCellsDraw[ i ].setx( predPositions[ i ][ 0 ] )
-            placeCellsDraw[ i ].sety( predPositions[ i ][ 1 ] )
+    for i in range( drawLength ):
+        if i <= len( ballAgent.predPositions ) - 1:
+            placeCellsDraw[ i ].setx( ballAgent.predPositions[ i ][ 0 ] )
+            placeCellsDraw[ i ].sety( ballAgent.predPositions[ i ][ 1 ] )
+        else:
+            placeCellsDraw[ i ].setx( 0 )
+            placeCellsDraw[ i ].sety( 0 )
