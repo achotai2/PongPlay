@@ -1,11 +1,11 @@
 # Simple Pong game combined with Nupic AI, in Python 3
 # By Anand Chotai
 
-import csv
-import datetime
+#import csv
+#import datetime
 import numpy
-import yaml
 import random
+from pynput import keyboard
 
 from agent_ball import BallAgent
 
@@ -60,7 +60,7 @@ paddle_b.penup()
 paddle_b.goto( 350, 240 )
 
 # Set up pred locations.
-drawLength = 20
+drawLength = 10
 placeCellsDraw = []
 for i in range( drawLength ):
     currPlaceDraw = turtle.Turtle( )
@@ -83,6 +83,13 @@ def Within ( value, minimum, maximum ):
         return True
     else:
         return False
+
+def on_press( key ):
+    if str( key ) == 'w':
+        print("----------------------------------------------------------------")
+
+listener = keyboard.Listener( on_press = on_press )
+listener.start()
 
 while True:
 # Main game loop----------------------------------------------------------------
@@ -127,7 +134,7 @@ while True:
 #        ball.goto( 340, ball.ycor() )
 
     # Run each agents learning algorithm and produce predictions.
-    ballAgent.Brain( ball.xcor(), ball.ycor() )
+    ballAgent.Brain( ball.xcor(), ball.ycor(), ball.dx, ball.dy )
 
     for i in range( drawLength ):
         if i <= len( ballAgent.predPositions ) - 1:
