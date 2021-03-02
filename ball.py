@@ -5,7 +5,6 @@
 #import datetime
 import numpy
 import random
-from pynput import keyboard
 
 from agent_ball import BallAgent
 
@@ -59,8 +58,11 @@ paddle_b.shapesize( stretch_wid = paddleHeight, stretch_len = paddleWidth )
 paddle_b.penup()
 paddle_b.goto( 350, 240 )
 
+# Create play agents------------------------------------------------------------
+ballAgent = BallAgent( 'BallAgent', screenHeight, screenWidth, ballHeight, ballWidth, paddleHeight, paddleWidth )
+
 # Set up pred locations.
-drawLength = 10
+drawLength = ballAgent.maxSequenceLength
 placeCellsDraw = []
 for i in range( drawLength ):
     currPlaceDraw = turtle.Turtle( )
@@ -72,8 +74,14 @@ for i in range( drawLength ):
     currPlaceDraw.goto( 0, 0 )
     placeCellsDraw.append( currPlaceDraw )
 
-# Create play agents------------------------------------------------------------
-ballAgent = BallAgent( 'BallAgent', screenHeight, screenWidth, ballHeight, ballWidth, paddleHeight, paddleWidth )
+# Set up agent attention square.
+#attentSqDraw = turtle.Turtle( )
+#attentSqDraw.speed( 0 )
+#attentSqDraw.shape( "square" )
+#attentSqDraw.color( "red" )
+#attentSqDraw.shapesize( stretch_wid = ballAgent.localDimX / 20, stretch_len = ballAgent.localDimY / 20 )
+#attentSqDraw.penup( )
+#attentSqDraw.goto( ballAgent.centerX, ballAgent.centerY )
 
 # Functions---------------------------------------------------------------------
 def Within ( value, minimum, maximum ):
@@ -83,13 +91,6 @@ def Within ( value, minimum, maximum ):
         return True
     else:
         return False
-
-def on_press( key ):
-    if str( key ) == 'w':
-        print("----------------------------------------------------------------")
-
-listener = keyboard.Listener( on_press = on_press )
-listener.start()
 
 while True:
 # Main game loop----------------------------------------------------------------
@@ -136,6 +137,11 @@ while True:
     # Run each agents learning algorithm and produce predictions.
     ballAgent.Brain( ball.xcor(), ball.ycor(), ball.dx, ball.dy )
 
+    # Draw attention square for ball agent.
+#    attentSqDraw.setx( ballAgent.centerX )
+#    attentSqDraw.sety( ballAgent.centerY )
+
+    # Draw predictions for ball agent.
     for i in range( drawLength ):
         if i <= len( ballAgent.predPositions ) - 1:
             placeCellsDraw[ i ].setx( ballAgent.predPositions[ i ][ 0 ] )

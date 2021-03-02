@@ -12,10 +12,13 @@ ScalarEncoderParameters = htm.bindings.encoders.ScalarEncoderParameters
 
 class BallAgent:
 
-    resolutionX = 20                # Should be an even number
-    resolutionY = 20
+    resolutionX = 24                # Should be an even number
+    resolutionY = 24
     localDimX   = 100
     localDimY   = 100
+
+    maxSequenceLength = 1
+    maxPredTimeDist   = 20
 
     def __init__( self, name, screenHeight, screenWidth, ballHeight, ballWidth, paddleHeight, paddleWidth ):
 
@@ -30,34 +33,62 @@ class BallAgent:
 
         centerVelXEncodeParams  = ScalarEncoderParameters()
         centerVelYEncodeParams  = ScalarEncoderParameters()
+        centerPosXEncodeParams  = ScalarEncoderParameters()
+        centerPosYEncodeParams  = ScalarEncoderParameters()
+        seqStepsEncodeParams    = ScalarEncoderParameters()
 
-        centerVelXEncodeParams.activeBits = 10
+        centerVelXEncodeParams.activeBits = 5
         centerVelXEncodeParams.radius     = 5
         centerVelXEncodeParams.clipInput  = False
         centerVelXEncodeParams.minimum    = -30
         centerVelXEncodeParams.maximum    = 30
         centerVelXEncodeParams.periodic   = False
 
-        centerVelYEncodeParams.activeBits = 10
+        centerVelYEncodeParams.activeBits = 5
         centerVelYEncodeParams.radius     = 5
         centerVelYEncodeParams.clipInput  = False
         centerVelYEncodeParams.minimum    = -30
         centerVelYEncodeParams.maximum    = 30
         centerVelYEncodeParams.periodic   = False
 
+        centerPosXEncodeParams.activeBits = 5
+        centerPosXEncodeParams.radius     = 5
+        centerPosXEncodeParams.clipInput  = False
+        centerPosXEncodeParams.minimum    = -int( self.screenWidth / 2 )
+        centerPosXEncodeParams.maximum    = int( self.screenWidth / 2 )
+        centerPosXEncodeParams.periodic   = False
+
+        centerPosYEncodeParams.activeBits = 5
+        centerPosYEncodeParams.radius     = 5
+        centerPosYEncodeParams.clipInput  = False
+        centerPosYEncodeParams.minimum    = -int( self.screenHeight / 2 )
+        centerPosYEncodeParams.maximum    = int( self.screenHeight / 2 )
+        centerPosYEncodeParams.periodic   = False
+
+        seqStepsEncodeParams.activeBits = 5
+        seqStepsEncodeParams.radius     = 1
+        seqStepsEncodeParams.clipInput  = False
+        seqStepsEncodeParams.minimum    = 0
+        seqStepsEncodeParams.maximum    = self.maxPredTimeDist
+        seqStepsEncodeParams.periodic   = False
+
         self.centerVelXEncoder = ScalarEncoder( centerVelXEncodeParams )
         self.centerVelYEncoder = ScalarEncoder( centerVelYEncodeParams )
+        self.centerPosXEncoder = ScalarEncoder( centerPosXEncodeParams )
+        self.centerPosYEncoder = ScalarEncoder( centerPosYEncodeParams )
+        self.seqStepsEncoder   = ScalarEncoder( seqStepsEncodeParams )
 
-        self.aspEncodingWidth = ( ( self.resolutionX * self.resolutionY ) + self.centerVelXEncoder.size + self.centerVelYEncoder.size )
+        self.aspEncodingWidth = ( ( self.resolutionX * self.resolutionY ) + self.centerVelXEncoder.size +
+            self.centerVelYEncoder.size + self.centerPosXEncoder.size + self.centerPosYEncoder.size + self.seqStepsEncoder.size )
 
         self.asp = SpatialPooler(
             inputDimensions            = ( self.aspEncodingWidth, ),
-            columnDimensions           = ( 2048, ),
+            columnDimensions           = ( 1024, ),
             potentialPct               = 0.85,
             potentialRadius            = self.aspEncodingWidth,
             globalInhibition           = True,
             localAreaDensity           = 0,
-            numActiveColumnsPerInhArea = 40,
+            numActiveColumnsPerInhArea = 20,
             synPermInactiveDec         = 0.005,
             synPermActiveInc           = 0.04,
             synPermConnected           = 0.1,
@@ -67,7 +98,7 @@ class BallAgent:
         )
 
         self.atp = TemporalMemory(
-            columnDimensions          = ( 2048, ),
+            columnDimensions          = ( 1024, ),
             cellsPerColumn            = 6,
             activationThreshold       = 16,
             initialPermanence         = 0.21,
@@ -82,16 +113,16 @@ class BallAgent:
             seed                      = 42
         )
 
-        self.centerXVelClassifier  = Classifier( alpha = 1 )
-        self.centerYVelClassifier  = Classifier( alpha = 1 )
+        self.centerShiftXClassifier  = Classifier( alpha = 1 )
+        self.centerShiftYClassifier  = Classifier( alpha = 1 )
 
         self.centerX    = 0
         self.centerY    = 0
         self.centerVelX = 0
         self.centerVelY = 0
-
         self.predPositions = []
-        self.lastSenseSDR  = SDR( self.asp.getColumnDimensions() )
+
+        self.sequenceLength = 0
 
     def Within ( self, value, minimum, maximum, equality ):
     # Checks if value is <= maximum and >= minimum.
@@ -107,13 +138,16 @@ class BallAgent:
             else:
                 return False
 
-    def EncodeSenseData ( self, bitRepresentation, centerVelX, centerVelY ):
+    def EncodeSenseData ( self, bitRepresentation, centerVelX, centerVelY, centerPosX, centerPosY, seqStep ):
     # Encodes sense data as an SDR and returns it.
 
         centerVelXBits = self.centerVelXEncoder.encode( centerVelX )
         centerVelYBits = self.centerVelYEncoder.encode( centerVelY )
+        centerPosXBits = self.centerPosXEncoder.encode( centerPosX )
+        centerPosYBits = self.centerPosYEncoder.encode( centerPosY )
+        seqStepBits    = self.seqStepsEncoder.encode( seqStep )
 
-        encoding = SDR( self.aspEncodingWidth ).concatenate( [ bitRepresentation, centerVelXBits, centerVelYBits ] )
+        encoding = SDR( self.aspEncodingWidth ).concatenate( [ bitRepresentation, centerVelXBits, centerVelYBits, centerPosXBits, centerPosYBits, seqStepBits ] )
         senseSDR = SDR( self.asp.getColumnDimensions() )
         self.asp.compute( encoding, True, senseSDR )
 
@@ -125,14 +159,14 @@ class BallAgent:
         for y in range( whatPrintY ):
             for x in range( whatPrintX ):
                 if x == whatPrintX - 1:
-                    print ("ENDO")
+                    print ( "ENDO" )
                     endRep = "\n"
                 else:
                     endRep = ""
                     if x + (y * whatPrintX ) in whatPrintRep:
-                        print(1, end=endRep)
+                        print( 1, end = endRep )
                     else:
-                        print(0, end=endRep)
+                        print( 0, end = endRep )
 
     def BuildLocalBitRep( self, localDimX, localDimY, centerX, centerY, ballX, ballY ):
     # Builds a bit-rep SDR of localDim dimensions centered around point with resolution.
@@ -196,20 +230,36 @@ class BallAgent:
                         else:
                             localBitRep.append( bitToAdd )
 
-#        self.PrintBitRep( localBitRep, self.resolutionX, self.resolutionY )
+        #self.PrintBitRep( localBitRep, self.resolutionX, self.resolutionY )
 
         bitRepSDR = SDR( maxArraySize )
         bitRepSDR.sparse = numpy.unique( localBitRep )
         return bitRepSDR
 
-    def PredictTimeStep ( self ):
-    # Use subsequence ball positions shift and btp to predict next number of ball positions.
+    def DetermineBurstPercent ( self, activeCellsTP ):
+    # Calculates percentage of active cells that are currently bursting.
+
+        # Get columns of all active cells.
+        activeColumnsTP = []
+        for cCell in activeCellsTP.sparse:
+            activeColumnsTP.append( self.atp.columnForCell( cCell ) )
+
+        # Get count of active cells in each active column.
+        colUnique, colCount = numpy.unique( activeColumnsTP, return_counts = True )
+
+        # Compute percentage of columns that are bursting.
+        bursting = 0
+        for c in colCount:
+            if c > 1:
+                bursting += 1
+        burstPercent = int( 100 * bursting / len( colCount ) )
+
+        return burstPercent
+
+    def PredictTimeStepSequence ( self, startSenseSDR ):
+    # Predict the next steps up to 10 in the sequence.
 
         self.predPositions.clear()
-
-        self.atp.reset()
-        self.atp.compute( self.lastSenseSDR, learn = True )
-        self.atp.activateDendrites( learn = True )
 
         tempCenterX    = self.centerX
         tempCenterY    = self.centerY
@@ -217,15 +267,11 @@ class BallAgent:
         tempCenterVelY = self.centerVelY
 
         tempSenseSDR = SDR( self.asp.getColumnDimensions() )
+        tempSenseSDR.sparse = startSenseSDR.sparse
 
-        # Predict next number of ball positions.
-        for predSteps in range( 10 ):
-            # Generate tempSenseSDR
-            tempSenseSDR = self.EncodeSenseData( self.BuildLocalBitRep( self.localDimX, self.localDimY, tempCenterX, tempCenterY, tempCenterX, tempCenterY ),
-                tempCenterVelX, tempCenterVelY )
+        self.atp.reset()
 
-            # Generate predictive cells.
-            self.atp.reset()
+        for seqStep in range( self.maxSequenceLength ):
             self.atp.compute( tempSenseSDR, learn = False )
             self.atp.activateDendrites( learn = False )
             predictCellsTP = self.atp.getPredictiveCells()
@@ -233,8 +279,8 @@ class BallAgent:
             tempSenseSDR.sparse = numpy.unique( [ self.atp.columnForCell( cell ) for cell in predictCellsTP.sparse ] )
 
             # Infer the position shift from this subsequence, and apply it to our temp position.
-            tempCenterVelX = numpy.argmax( self.centerXVelClassifier.infer( pattern = tempSenseSDR ) ) - 100
-            tempCenterVelY = numpy.argmax( self.centerYVelClassifier.infer( pattern = tempSenseSDR ) ) - 100
+            tempCenterVelX = numpy.argmax( self.centerShiftXClassifier.infer( pattern = tempSenseSDR ) ) - int( self.screenWidth / 2 )
+            tempCenterVelY = numpy.argmax( self.centerShiftYClassifier.infer( pattern = tempSenseSDR ) ) - int( self.screenHeight / 2 )
 
             if tempCenterVelX < -30:
                 tempCenterVelX = -30
@@ -255,6 +301,10 @@ class BallAgent:
             # Append this position as a prediction.
             self.predPositions.append( [ tempCenterX, tempCenterY ] )
 
+            # Generate tempSenseSDR for next predicted step.
+            tempSenseSDR = self.EncodeSenseData( self.BuildLocalBitRep( self.localDimX, self.localDimY, tempCenterX, tempCenterY, tempCenterX, tempCenterY ),
+                tempCenterVelX, tempCenterVelY, tempCenterX, tempCenterY, seqStep )
+
     def Brain ( self, ballX, ballY, ballXSpeed, ballYSpeed ):
     # Agents brain center.
 
@@ -265,19 +315,22 @@ class BallAgent:
 
         # Feed in attention view to encode bit representation and produce SDR.
         senseSDR = self.EncodeSenseData( self.BuildLocalBitRep( self.localDimX, self.localDimY, self.centerX, self.centerY, ballX, ballY ),
-            self.centerVelX, self.centerVelY )
+            self.centerVelX, self.centerVelY, self.centerX, self.centerY, self.sequenceLength )
 
-        self.centerXVelClassifier.learn( pattern = senseSDR, classification = self.centerVelX + 100 )
-        self.centerYVelClassifier.learn( pattern = senseSDR, classification = self.centerVelY + 100 )
+        self.centerShiftXClassifier.learn( pattern = senseSDR, classification = self.centerVelX + int( self.screenWidth / 2 ) )
+        self.centerShiftYClassifier.learn( pattern = senseSDR, classification = self.centerVelY + int( self.screenHeight / 2 ) )
 
         # Feed SDR into atp to learn as part of sequence.
-        self.atp.reset()
-        self.atp.compute( self.lastSenseSDR, learn = True )
-        self.atp.activateDendrites( learn = True )
+        if self.sequenceLength > self.maxSequenceLength:
+            self.sequenceLength = 0
+            # Generate predictions.
+            self.PredictTimeStepSequence( senseSDR )
+            self.atp.reset()
+
+#        self.atp.compute( self.lastSenseSDR, learn = True )
+#        self.atp.activateDendrites( learn = True )
         self.atp.compute( senseSDR, learn = True )
         self.atp.activateDendrites( learn = True )
 
-        self.lastSenseSDR = senseSDR
-
-        # Generate predictions.
-        self.PredictTimeStep()
+#        self.lastSenseSDR = senseSDR
+        self.sequenceLength += 1
