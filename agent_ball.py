@@ -1,24 +1,33 @@
 import numpy
-import sys
-import random
 
 from htm.bindings.sdr import SDR, Metrics
-from htm.bindings.algorithms import SpatialPooler
-from htm.bindings.algorithms import TemporalMemory
-from htm.bindings.algorithms import Classifier
 import htm.bindings.encoders
 ScalarEncoder = htm.bindings.encoders.ScalarEncoder
 ScalarEncoderParameters = htm.bindings.encoders.ScalarEncoderParameters
+from htm.bindings.algorithms import SpatialPooler
+from htm.bindings.algorithms import TemporalMemory
+from htm.bindings.algorithms import Classifier
+
+def Within ( value, minimum, maximum, equality ):
+# Checks if value is <= maximum and >= minimum.
+
+    if equality:
+        if value <= maximum and value >= minimum:
+            return True
+        else:
+            return False
+    else:
+        if value < maximum and value > minimum:
+            return True
+        else:
+            return False
 
 class BallAgent:
 
-    resolutionX = 24                # Should be an even number
-    resolutionY = 24
     localDimX   = 100
     localDimY   = 100
 
-    maxSequenceLength = 1
-    maxPredTimeDist   = 20
+    maxMemoryDist = 10
 
     def __init__( self, name, screenHeight, screenWidth, ballHeight, ballWidth, paddleHeight, paddleWidth ):
 
@@ -26,69 +35,58 @@ class BallAgent:
 
         self.screenHeight = screenHeight
         self.screenWidth  = screenWidth
-        self.ballHeight   = ballHeight
-        self.ballWidth    = ballWidth
-        self.paddleHeight = paddleHeight
-        self.paddleWidth  = paddleWidth
 
-        centerVelXEncodeParams  = ScalarEncoderParameters()
-        centerVelYEncodeParams  = ScalarEncoderParameters()
-        centerPosXEncodeParams  = ScalarEncoderParameters()
-        centerPosYEncodeParams  = ScalarEncoderParameters()
-        seqStepsEncodeParams    = ScalarEncoderParameters()
+        # Set up encoder parameters
+        localXEncodeParams    = ScalarEncoderParameters()
+        localYEncodeParams    = ScalarEncoderParameters()
+        centerXEncodeParams   = ScalarEncoderParameters()
+        centerYEncodeParams   = ScalarEncoderParameters()
 
-        centerVelXEncodeParams.activeBits = 5
-        centerVelXEncodeParams.radius     = 5
-        centerVelXEncodeParams.clipInput  = False
-        centerVelXEncodeParams.minimum    = -30
-        centerVelXEncodeParams.maximum    = 30
-        centerVelXEncodeParams.periodic   = False
+        localXEncodeParams.activeBits = 21
+        localXEncodeParams.radius     = 20
+        localXEncodeParams.clipInput  = False
+        localXEncodeParams.minimum    = -int( screenWidth / 2 )
+        localXEncodeParams.maximum    = int( screenWidth / 2 )
+        localXEncodeParams.periodic   = False
 
-        centerVelYEncodeParams.activeBits = 5
-        centerVelYEncodeParams.radius     = 5
-        centerVelYEncodeParams.clipInput  = False
-        centerVelYEncodeParams.minimum    = -30
-        centerVelYEncodeParams.maximum    = 30
-        centerVelYEncodeParams.periodic   = False
+        localYEncodeParams.activeBits = 21
+        localYEncodeParams.radius     = 20
+        localYEncodeParams.clipInput  = False
+        localYEncodeParams.minimum    = -int( screenHeight / 2 )
+        localYEncodeParams.maximum    = int( screenHeight / 2 )
+        localYEncodeParams.periodic   = False
 
-        centerPosXEncodeParams.activeBits = 5
-        centerPosXEncodeParams.radius     = 5
-        centerPosXEncodeParams.clipInput  = False
-        centerPosXEncodeParams.minimum    = -int( self.screenWidth / 2 )
-        centerPosXEncodeParams.maximum    = int( self.screenWidth / 2 )
-        centerPosXEncodeParams.periodic   = False
+        centerXEncodeParams.activeBits = 5
+        centerXEncodeParams.radius     = 20
+        centerXEncodeParams.clipInput  = False
+        centerXEncodeParams.minimum    = -int( screenWidth / 2 )
+        centerXEncodeParams.maximum    = int( screenWidth / 2 )
+        centerXEncodeParams.periodic   = False
 
-        centerPosYEncodeParams.activeBits = 5
-        centerPosYEncodeParams.radius     = 5
-        centerPosYEncodeParams.clipInput  = False
-        centerPosYEncodeParams.minimum    = -int( self.screenHeight / 2 )
-        centerPosYEncodeParams.maximum    = int( self.screenHeight / 2 )
-        centerPosYEncodeParams.periodic   = False
+        centerYEncodeParams.activeBits = 5
+        centerYEncodeParams.radius     = 20
+        centerYEncodeParams.clipInput  = False
+        centerYEncodeParams.minimum    = -int( screenHeight / 2 )
+        centerYEncodeParams.maximum    = int( screenHeight / 2 )
+        centerYEncodeParams.periodic   = False
 
-        seqStepsEncodeParams.activeBits = 5
-        seqStepsEncodeParams.radius     = 1
-        seqStepsEncodeParams.clipInput  = False
-        seqStepsEncodeParams.minimum    = 0
-        seqStepsEncodeParams.maximum    = self.maxPredTimeDist
-        seqStepsEncodeParams.periodic   = False
+        # Set up encoders
+        self.localEncoderX    = ScalarEncoder( localXEncodeParams )
+        self.localEncoderY    = ScalarEncoder( localYEncodeParams )
+        self.centerEncoderX   = ScalarEncoder( centerXEncodeParams )
+        self.centerEncoderY   = ScalarEncoder( centerYEncodeParams )
 
-        self.centerVelXEncoder = ScalarEncoder( centerVelXEncodeParams )
-        self.centerVelYEncoder = ScalarEncoder( centerVelYEncodeParams )
-        self.centerPosXEncoder = ScalarEncoder( centerPosXEncodeParams )
-        self.centerPosYEncoder = ScalarEncoder( centerPosYEncodeParams )
-        self.seqStepsEncoder   = ScalarEncoder( seqStepsEncodeParams )
+        self.encodingWidth = ( self.localEncoderX.size + self.localEncoderY.size + self.centerEncoderX.size +
+            self.centerEncoderY.size )
 
-        self.aspEncodingWidth = ( ( self.resolutionX * self.resolutionY ) + self.centerVelXEncoder.size +
-            self.centerVelYEncoder.size + self.centerPosXEncoder.size + self.centerPosYEncoder.size + self.seqStepsEncoder.size )
-
-        self.asp = SpatialPooler(
-            inputDimensions            = ( self.aspEncodingWidth, ),
-            columnDimensions           = ( 1024, ),
+        self.sp = SpatialPooler(
+            inputDimensions            = ( self.encodingWidth, ),
+            columnDimensions           = ( 2048, ),
             potentialPct               = 0.85,
-            potentialRadius            = self.aspEncodingWidth,
+            potentialRadius            = self.encodingWidth,
             globalInhibition           = True,
             localAreaDensity           = 0,
-            numActiveColumnsPerInhArea = 20,
+            numActiveColumnsPerInhArea = 40,
             synPermInactiveDec         = 0.005,
             synPermActiveInc           = 0.04,
             synPermConnected           = 0.1,
@@ -97,9 +95,9 @@ class BallAgent:
             wrapAround                 = False
         )
 
-        self.atp = TemporalMemory(
-            columnDimensions          = ( 1024, ),
-            cellsPerColumn            = 6,
+        self.tp = TemporalMemory(
+            columnDimensions          = ( 2048, ),
+            cellsPerColumn            = 32,
             activationThreshold       = 16,
             initialPermanence         = 0.21,
             connectedPermanence       = 0.1,
@@ -113,224 +111,115 @@ class BallAgent:
             seed                      = 42
         )
 
-        self.centerShiftXClassifier  = Classifier( alpha = 1 )
-        self.centerShiftYClassifier  = Classifier( alpha = 1 )
+        self.xPosition = Classifier( alpha = 1 )
+        self.yPosition = Classifier( alpha = 1 )
 
-        self.centerX    = 0
-        self.centerY    = 0
-        self.centerVelX = 0
-        self.centerVelY = 0
         self.predPositions = []
+        self.memBuffer = [ [ 0,0 ], [ 0,0 ] ]
 
-        self.sequenceLength = 0
-
-    def Within ( self, value, minimum, maximum, equality ):
-    # Checks if value is <= maximum and >= minimum.
-
-        if equality:
-            if value <= maximum and value >= minimum:
-                return True
-            else:
-                return False
-        else:
-            if value < maximum and value > minimum:
-                return True
-            else:
-                return False
-
-    def EncodeSenseData ( self, bitRepresentation, centerVelX, centerVelY, centerPosX, centerPosY, seqStep ):
+    def EncodeSenseData ( self, localX, localY, centerX, centerY ):
     # Encodes sense data as an SDR and returns it.
 
-        centerVelXBits = self.centerVelXEncoder.encode( centerVelX )
-        centerVelYBits = self.centerVelYEncoder.encode( centerVelY )
-        centerPosXBits = self.centerPosXEncoder.encode( centerPosX )
-        centerPosYBits = self.centerPosYEncoder.encode( centerPosY )
-        seqStepBits    = self.seqStepsEncoder.encode( seqStep )
+        # Now we call the encoders to create bit representations for each value, and encode them.
+        localBitsX   = self.localEncoderX.encode( localX )
+        localBitsY   = self.localEncoderY.encode( localY )
+        centerBitsX  = self.centerEncoderX.encode( centerX )
+        centerBitsY  = self.centerEncoderY.encode( centerY )
 
-        encoding = SDR( self.aspEncodingWidth ).concatenate( [ bitRepresentation, centerVelXBits, centerVelYBits, centerPosXBits, centerPosYBits, seqStepBits ] )
-        senseSDR = SDR( self.asp.getColumnDimensions() )
-        self.asp.compute( encoding, True, senseSDR )
+        # Concatenate all these encodings into one large encoding for Spatial Pooling.
+        encoding = SDR( self.encodingWidth ).concatenate( [ localBitsX, localBitsY, centerBitsX, centerBitsY ] )
+        senseSDR = SDR( self.sp.getColumnDimensions() )
+        self.sp.compute( encoding, True, senseSDR )
 
         return senseSDR
 
-    def PrintBitRep( self, whatPrintRep, whatPrintX, whatPrintY ):
-    # Prints out the bit represention.
+    def LearnTimeStep ( self, secondLast, last, present, doLearn ):
+    # Learn the three time-step data, from second last to last to present, centered around last time-step.
 
-        for y in range( whatPrintY ):
-            for x in range( whatPrintX ):
-                if x == whatPrintX - 1:
-                    print ( "ENDO" )
-                    endRep = "\n"
-                else:
-                    endRep = ""
-                    if x + (y * whatPrintX ) in whatPrintRep:
-                        print( 1, end = endRep )
-                    else:
-                        print( 0, end = endRep )
+        self.tp.reset()
 
-    def BuildLocalBitRep( self, localDimX, localDimY, centerX, centerY, ballX, ballY ):
-    # Builds a bit-rep SDR of localDim dimensions centered around point with resolution.
+        if Within( secondLast[ 0 ] - last[ 0 ], -self.localDimX, self.localDimX, True ):
+            if Within( secondLast[ 1 ] - last[ 1 ], -self.localDimY, self.localDimY, True ):
+                secondLastSDR = self.EncodeSenseData( secondLast[ 0 ] - last[ 0 ], secondLast[ 1 ] - last[ 1 ], last[ 0 ], last[ 1 ] )
 
-        maxArraySize = self.resolutionX * self.resolutionY
+                # Feed x and y position into classifier to learn.
+                # Classifier can only take positive input, so need to transform ball origin.
+                if doLearn:
+                    self.xPosition.learn( pattern = secondLastSDR, classification = secondLast[ 0 ] - last[ 0 ] + int( self.localDimX / 2 ) )
+                    self.yPosition.learn( pattern = secondLastSDR, classification = secondLast[ 1 ] - last[ 1 ] + int( self.localDimY / 2 ) )
 
-        localBitRep = []
+                # Reset tp and feed SDR into tp.
+                self.tp.compute( secondLastSDR, learn = doLearn )
+                self.tp.activateDendrites( learn = doLearn )
 
-        scaleX = localDimX / self.resolutionX
-        scaleY = localDimY / self.resolutionY
+        # Generate SDR for last sense data by feeding sense data into SP with learning.
+        lastSDR = self.EncodeSenseData( 0, 0, last[ 0 ], last[ 1 ] )
 
-        if scaleX < 1 or scaleY < 1:
-            sys.exit( "Resolution (X and Y) must be less than local dimensions (X and Y)." )
+        if doLearn:
+            self.xPosition.learn( pattern = lastSDR, classification = int( self.localDimX / 2 ) )
+            self.yPosition.learn( pattern = lastSDR, classification = int( self.localDimY / 2 ) )
 
-        # Right side border bits.
-        if self.Within( self.screenWidth / 2, centerX - ( localDimX / 2 ), centerX + ( localDimX / 2 ), False ):
-            for y in range( self.resolutionY ):
-                bitToAdd = int( ( ( self.screenWidth / 2 ) - centerX + ( localDimX / 2 ) ) / scaleX ) + ( y * self.resolutionX )
-                if bitToAdd >= maxArraySize or bitToAdd < 0:
-                    sys.exit( "Right side border bit outside aspEncodingWidth size." )
-                else:
-                    localBitRep.append( bitToAdd )
+        self.tp.compute( lastSDR, learn = doLearn )
+        self.tp.activateDendrites( learn = doLearn )
 
-        # Left side border bits.
-        if self.Within( -self.screenWidth / 2, centerX - ( localDimX / 2 ), centerX + ( localDimX / 2 ), False ):
-            for y in range( self.resolutionY ):
-                bitToAdd = int( ( -( self.screenWidth / 2 ) - centerX + ( localDimX / 2 ) ) / scaleX ) + ( y * self.resolutionX )
-                if bitToAdd >= maxArraySize or bitToAdd < 0:
-                    sys.exit( "Left side border bit outside aspEncodingWidth size." )
-                else:
-                    localBitRep.append( bitToAdd )
+        if Within( present[ 0 ] - last[ 0 ], -self.localDimX, self.localDimX, True ):
+            if Within( present[ 1 ] - last[ 1 ], -self.localDimY, self.localDimY, True ):
+                # Generate SDR for last sense data by feeding sense data into SP with learning.
+                senseSDR = self.EncodeSenseData( present[ 0 ] - last[ 0 ], present[ 1 ] - last[ 1 ], last[ 0 ], last[ 1 ] )
 
-        # Top side border bits.
-        if self.Within( self.screenHeight / 2, centerY - ( localDimY / 2 ), centerY + ( localDimY / 2 ), False ):
-            for x in range( self.resolutionX ):
-                bitToAdd = x + ( int( ( (self.screenHeight / 2 ) - centerY + ( localDimY / 2 ) ) / scaleY ) * self.resolutionX )
-                if bitToAdd >= maxArraySize or bitToAdd < 0:
-                    sys.exit( "Top border bit outside aspEncodingWidth size:" )
-                else:
-                    localBitRep.append( bitToAdd )
+                if doLearn:
+                    self.xPosition.learn( pattern = senseSDR, classification = present[ 0 ] - last[ 0 ] + int( self.localDimX / 2 ) )
+                    self.yPosition.learn( pattern = senseSDR, classification = present[ 1 ] - last[ 1 ] + int( self.localDimY / 2 ) )
 
-        # Bottom side border bits.
-        if self.Within( -self.screenHeight / 2, centerY - ( localDimY / 2 ), centerY + ( localDimY / 2 ), False ):
-            for x in range( self.resolutionX ):
-                bitToAdd = x + ( int( ( -(self.screenHeight / 2 ) - centerY + ( localDimY / 2 ) ) / scaleY ) * self.resolutionX )
-                if bitToAdd >= maxArraySize or bitToAdd < 0:
-                    sys.exit( "Bottom border bit outside aspEncodingWidth size." )
-                else:
-                    localBitRep.append( bitToAdd )
+                self.tp.compute( senseSDR, learn = doLearn )
+                self.tp.activateDendrites( learn = doLearn )
 
-        # Ball bits.
-        if self.Within( ballX, centerX - ( localDimX / 2 ) - ( self.ballWidth * 10 ), centerX + ( localDimX / 2 ) + ( self.ballWidth * 10 ), False ) and self.Within( ballY, centerY - ( localDimY / 2 ) - ( self.ballHeight * 10 ), centerY + ( localDimY / 2 ) + ( self.ballHeight * 10 ), False ):
-            for x in range( self.ballWidth * 20 ):
-                for y in range( self.ballHeight * 20 ):
-                    if self.Within( ballX - ( self.ballWidth * 10 ) + x, centerX - ( localDimX / 2 ), centerX + ( localDimX / 2 ), False ) and self.Within( ballY - ( self.ballHeight * 10 ) + y, centerY - ( localDimY / 2 ), centerY + ( localDimY / 2 ), False ):
-                        bitX = ballX - ( self.ballWidth * 10 ) + x - centerX + ( localDimX / 2 )
-                        bitY = ballY - ( self.ballHeight * 10 ) + y - centerY + ( localDimY / 2 )
-                        bitToAdd = int( bitX / scaleX ) + ( int( bitY / scaleY ) * self.resolutionX )
-                        if bitToAdd >= maxArraySize or bitToAdd < 0:
-                            sys.exit( "Ball bit outside aspEncodingWidth size." )
-                        else:
-                            localBitRep.append( bitToAdd )
+    def PredictTimeStep ( self, secondLast, last, doLearn ):
+    # Train time-step data, from secondlast to last, centered around last, and then predict next position and return.
 
-        #self.PrintBitRep( localBitRep, self.resolutionX, self.resolutionY )
+        self.tp.reset()
 
-        bitRepSDR = SDR( maxArraySize )
-        bitRepSDR.sparse = numpy.unique( localBitRep )
-        return bitRepSDR
+        if Within( secondLast[ 0 ] - last[ 0 ], -self.localDimX, self.localDimX, True ):
+            if Within( secondLast[ 1 ] - last[ 1 ], -self.localDimY, self.localDimY, True ):
+                secondLastSDR = self.EncodeSenseData( secondLast[ 0 ] - last[ 0 ], secondLast[ 1 ] - last[ 1 ], last[ 0 ], last[ 1 ] )
+                self.tp.compute( secondLastSDR, learn = doLearn )
+                self.tp.activateDendrites( learn = doLearn )
 
-    def DetermineBurstPercent ( self, activeCellsTP ):
-    # Calculates percentage of active cells that are currently bursting.
+        lastSDR = self.EncodeSenseData( 0, 0, last[ 0 ], last[ 1 ] )
+        self.tp.compute( lastSDR, learn = doLearn )
+        self.tp.activateDendrites( learn = doLearn )
+        predictCellsTP = self.tp.getPredictiveCells()
 
-        # Get columns of all active cells.
-        activeColumnsTP = []
-        for cCell in activeCellsTP.sparse:
-            activeColumnsTP.append( self.atp.columnForCell( cCell ) )
+        # Get predicted location for next time step.
+        stepSenseSDR = SDR( self.sp.getColumnDimensions() )
+        stepSenseSDR.sparse = numpy.unique( [ self.tp.columnForCell( cell ) for cell in predictCellsTP.sparse ] )
+        positionX = numpy.argmax( self.xPosition.infer( pattern = stepSenseSDR ) ) - int( self.localDimX / 2 )
+        positionY = numpy.argmax( self.yPosition.infer( pattern = stepSenseSDR ) ) - int( self.localDimY / 2 )
 
-        # Get count of active cells in each active column.
-        colUnique, colCount = numpy.unique( activeColumnsTP, return_counts = True )
+        return [ last[ 0 ] + positionX, last[ 1 ] + positionY ]
 
-        # Compute percentage of columns that are bursting.
-        bursting = 0
-        for c in colCount:
-            if c > 1:
-                bursting += 1
-        burstPercent = int( 100 * bursting / len( colCount ) )
-
-        return burstPercent
-
-    def PredictTimeStepSequence ( self, startSenseSDR ):
-    # Predict the next steps up to 10 in the sequence.
-
-        self.predPositions.clear()
-
-        tempCenterX    = self.centerX
-        tempCenterY    = self.centerY
-        tempCenterVelX = self.centerVelX
-        tempCenterVelY = self.centerVelY
-
-        tempSenseSDR = SDR( self.asp.getColumnDimensions() )
-        tempSenseSDR.sparse = startSenseSDR.sparse
-
-        self.atp.reset()
-
-        for seqStep in range( self.maxSequenceLength ):
-            self.atp.compute( tempSenseSDR, learn = False )
-            self.atp.activateDendrites( learn = False )
-            predictCellsTP = self.atp.getPredictiveCells()
-
-            tempSenseSDR.sparse = numpy.unique( [ self.atp.columnForCell( cell ) for cell in predictCellsTP.sparse ] )
-
-            # Infer the position shift from this subsequence, and apply it to our temp position.
-            tempCenterVelX = numpy.argmax( self.centerShiftXClassifier.infer( pattern = tempSenseSDR ) ) - int( self.screenWidth / 2 )
-            tempCenterVelY = numpy.argmax( self.centerShiftYClassifier.infer( pattern = tempSenseSDR ) ) - int( self.screenHeight / 2 )
-
-            if tempCenterVelX < -30:
-                tempCenterVelX = -30
-            if tempCenterVelY < -30:
-                tempCenterVelY = -30
-
-            tempCenterX += tempCenterVelX
-            if tempCenterX > self.screenWidth / 2:
-                tempCenterX = self.screenWidth / 2
-            elif tempCenterX < -self.screenWidth / 2:
-                tempCenterX = -self.screenWidth / 2
-            tempCenterY += tempCenterVelY
-            if tempCenterY > self.screenHeight / 2:
-                tempCenterY = self.screenHeight / 2
-            elif tempCenterY < -self.screenHeight / 2:
-                tempCenterY = -self.screenHeight / 2
-
-            # Append this position as a prediction.
-            self.predPositions.append( [ tempCenterX, tempCenterY ] )
-
-            # Generate tempSenseSDR for next predicted step.
-            tempSenseSDR = self.EncodeSenseData( self.BuildLocalBitRep( self.localDimX, self.localDimY, tempCenterX, tempCenterY, tempCenterX, tempCenterY ),
-                tempCenterVelX, tempCenterVelY, tempCenterX, tempCenterY, seqStep )
-
-    def Brain ( self, ballX, ballY, ballXSpeed, ballYSpeed ):
+    def Brain ( self, ballX, ballY ):
     # Agents brain center.
 
-        self.centerX    = ballX
-        self.centerY    = ballY
-        self.centerVelX = ballXSpeed
-        self.centerVelY = ballYSpeed
+        self.LearnTimeStep( self.memBuffer[ -2 ], self.memBuffer[ -1 ], [ ballX, ballY ], True )
 
-        # Feed in attention view to encode bit representation and produce SDR.
-        senseSDR = self.EncodeSenseData( self.BuildLocalBitRep( self.localDimX, self.localDimY, self.centerX, self.centerY, ballX, ballY ),
-            self.centerVelX, self.centerVelY, self.centerX, self.centerY, self.sequenceLength )
+        # Set present ball coordinates for next time-step.
+        self.memBuffer.append( [ ballX, ballY ] )
+        while len( self.memBuffer ) > self.maxMemoryDist:
+            self.memBuffer.pop( 0 )
 
-        self.centerShiftXClassifier.learn( pattern = senseSDR, classification = self.centerVelX + int( self.screenWidth / 2 ) )
-        self.centerShiftYClassifier.learn( pattern = senseSDR, classification = self.centerVelY + int( self.screenHeight / 2 ) )
+        # Store last and present locations.
+        self.predPositions.clear()
+        self.predPositions.append( self.memBuffer[ -2 ] )
+        self.predPositions.append( self.memBuffer[ -1 ] )
 
-        # Feed SDR into atp to learn as part of sequence.
-        if self.sequenceLength > self.maxSequenceLength:
-            self.sequenceLength = 0
-            # Generate predictions.
-            self.PredictTimeStepSequence( senseSDR )
-            self.atp.reset()
-
-#        self.atp.compute( self.lastSenseSDR, learn = True )
-#        self.atp.activateDendrites( learn = True )
-        self.atp.compute( senseSDR, learn = True )
-        self.atp.activateDendrites( learn = True )
-
-#        self.lastSenseSDR = senseSDR
-        self.sequenceLength += 1
+        # Predict next 10 time step locations and store them.
+        for step in range( self.maxMemoryDist ):
+            nextPosition = self.PredictTimeStep( self.predPositions[ -2 ], self.predPositions[ -1 ], False )
+            if Within( nextPosition[ 0 ], -self.screenWidth / 2, self.screenWidth / 2, True ):
+                if Within( nextPosition[ 1 ], -self.screenHeight / 2, self.screenHeight / 2, True ):
+                    self.predPositions.append( nextPosition )
+                else:
+                    break
+            else:
+                break

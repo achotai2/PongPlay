@@ -62,7 +62,7 @@ paddle_b.goto( 350, 240 )
 ballAgent = BallAgent( 'BallAgent', screenHeight, screenWidth, ballHeight, ballWidth, paddleHeight, paddleWidth )
 
 # Set up pred locations.
-drawLength = ballAgent.maxSequenceLength
+drawLength = ballAgent.maxMemoryDist
 placeCellsDraw = []
 for i in range( drawLength ):
     currPlaceDraw = turtle.Turtle( )
@@ -135,7 +135,7 @@ while True:
 #        ball.goto( 340, ball.ycor() )
 
     # Run each agents learning algorithm and produce predictions.
-    ballAgent.Brain( ball.xcor(), ball.ycor(), ball.dx, ball.dy )
+    ballAgent.Brain( ball.xcor(), ball.ycor() )
 
     # Draw attention square for ball agent.
 #    attentSqDraw.setx( ballAgent.centerX )
