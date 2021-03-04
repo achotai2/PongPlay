@@ -125,17 +125,17 @@ while True:
 
     # Paddle and ball collisions
 #    if ball.xcor() < -340 and ball.ycor() < paddle_a.ycor() + 50 and ball.ycor() > paddle_a.ycor() - 50:
-        # Ball hits paddle A
+#        # Ball hits paddle A
 #        ball.dx *= -1
 #        ball.goto( -340, ball.ycor() )
 
 #    elif ball.xcor() > 340 and ball.ycor() < paddle_b.ycor() + 50 and ball.ycor() > paddle_b.ycor() - 50:
-        # Ball hits paddle B
+#        # Ball hits paddle B
 #        ball.dx *= -1
 #        ball.goto( 340, ball.ycor() )
 
     # Run each agents learning algorithm and produce predictions.
-    ballAgent.Brain( ball.xcor(), ball.ycor() )
+    ballAgent.Brain( ball.xcor(), ball.ycor(), paddle_a.ycor() )
 
     # Draw attention square for ball agent.
 #    attentSqDraw.setx( ballAgent.centerX )

@@ -26,6 +26,8 @@ class BallAgent:
 
     localDimX   = 100
     localDimY   = 100
+    resolutionX = 24
+    resolutionY = 24
 
     maxMemoryDist = 10
 
@@ -35,26 +37,14 @@ class BallAgent:
 
         self.screenHeight = screenHeight
         self.screenWidth  = screenWidth
+        self.ballHeight   = ballHeight
+        self.ballWidth    = ballWidth
+        self.paddleHeight = paddleHeight
+        self.paddleWidth  = paddleWidth
 
         # Set up encoder parameters
-        localXEncodeParams    = ScalarEncoderParameters()
-        localYEncodeParams    = ScalarEncoderParameters()
         centerXEncodeParams   = ScalarEncoderParameters()
         centerYEncodeParams   = ScalarEncoderParameters()
-
-        localXEncodeParams.activeBits = 21
-        localXEncodeParams.radius     = 20
-        localXEncodeParams.clipInput  = False
-        localXEncodeParams.minimum    = -int( screenWidth / 2 )
-        localXEncodeParams.maximum    = int( screenWidth / 2 )
-        localXEncodeParams.periodic   = False
-
-        localYEncodeParams.activeBits = 21
-        localYEncodeParams.radius     = 20
-        localYEncodeParams.clipInput  = False
-        localYEncodeParams.minimum    = -int( screenHeight / 2 )
-        localYEncodeParams.maximum    = int( screenHeight / 2 )
-        localYEncodeParams.periodic   = False
 
         centerXEncodeParams.activeBits = 5
         centerXEncodeParams.radius     = 20
@@ -71,13 +61,11 @@ class BallAgent:
         centerYEncodeParams.periodic   = False
 
         # Set up encoders
-        self.localEncoderX    = ScalarEncoder( localXEncodeParams )
-        self.localEncoderY    = ScalarEncoder( localYEncodeParams )
-        self.centerEncoderX   = ScalarEncoder( centerXEncodeParams )
-        self.centerEncoderY   = ScalarEncoder( centerYEncodeParams )
+        self.centerXEncoder   = ScalarEncoder( centerXEncodeParams )
+        self.centerYEncoder   = ScalarEncoder( centerYEncodeParams )
 
-        self.encodingWidth = ( self.localEncoderX.size + self.localEncoderY.size + self.centerEncoderX.size +
-            self.centerEncoderY.size )
+        self.encodingWidth = ( ( self.resolutionX * self.resolutionY ) + self.centerXEncoder.size +
+            self.centerYEncoder.size )
 
         self.sp = SpatialPooler(
             inputDimensions            = ( self.encodingWidth, ),
@@ -115,19 +103,99 @@ class BallAgent:
         self.yPosition = Classifier( alpha = 1 )
 
         self.predPositions = []
-        self.memBuffer = [ [ 0,0 ], [ 0,0 ] ]
+        self.memBuffer = [ [ 0, 0, 0 ], [ 0, 0, 0 ] ]
 
-    def EncodeSenseData ( self, localX, localY, centerX, centerY ):
+    def PrintBitRep( self, whatPrintRep, whatPrintX, whatPrintY ):
+    # Prints out the bit represention.
+
+        for y in range( whatPrintY ):
+            for x in range( whatPrintX ):
+                if x == whatPrintX - 1:
+                    print ("ENDO")
+                    endRep = "\n"
+                else:
+                    endRep = ""
+                    if x + (y * whatPrintX ) in whatPrintRep:
+                        print(1, end=endRep)
+                    else:
+                        print(0, end=endRep)
+
+    def BuildLocalBitRep( self, localDimX, localDimY, centerX, centerY, ballX, ballY ):
+    # Builds a bit-rep SDR of localDim dimensions centered around point with resolution.
+
+        maxArraySize = self.resolutionX * self.resolutionY
+
+        localBitRep = []
+
+        scaleX = localDimX / self.resolutionX
+        scaleY = localDimY / self.resolutionY
+
+        if scaleX < 1 or scaleY < 1:
+            sys.exit( "Resolution (X and Y) must be less than local dimensions (X and Y)." )
+
+        # Right side border bits.
+        if Within( self.screenWidth / 2, centerX - ( localDimX / 2 ), centerX + ( localDimX / 2 ), False ):
+            for y in range( self.resolutionY ):
+                bitToAdd = int( ( ( self.screenWidth / 2 ) - centerX + ( localDimX / 2 ) ) / scaleX ) + ( y * self.resolutionX )
+                if bitToAdd >= maxArraySize or bitToAdd < 0:
+                    sys.exit( "Right side border bit outside EncodingWidth size." )
+                else:
+                    localBitRep.append( bitToAdd )
+
+        # Left side border bits.
+        if Within( -self.screenWidth / 2, centerX - ( localDimX / 2 ), centerX + ( localDimX / 2 ), False ):
+            for y in range( self.resolutionY ):
+                bitToAdd = int( ( -( self.screenWidth / 2 ) - centerX + ( localDimX / 2 ) ) / scaleX ) + ( y * self.resolutionX )
+                if bitToAdd >= maxArraySize or bitToAdd < 0:
+                    sys.exit( "Left side border bit outside EncodingWidth size." )
+                else:
+                    localBitRep.append( bitToAdd )
+
+        # Top side border bits.
+        if Within( self.screenHeight / 2, centerY - ( localDimY / 2 ), centerY + ( localDimY / 2 ), False ):
+            for x in range( self.resolutionX ):
+                bitToAdd = x + ( int( ( (self.screenHeight / 2 ) - centerY + ( localDimY / 2 ) ) / scaleY ) * self.resolutionX )
+                if bitToAdd >= maxArraySize or bitToAdd < 0:
+                    sys.exit( "Top border bit outside EncodingWidth size:" )
+                else:
+                    localBitRep.append( bitToAdd )
+
+        # Bottom side border bits.
+        if Within( -self.screenHeight / 2, centerY - ( localDimY / 2 ), centerY + ( localDimY / 2 ), False ):
+            for x in range( self.resolutionX ):
+                bitToAdd = x + ( int( ( -(self.screenHeight / 2 ) - centerY + ( localDimY / 2 ) ) / scaleY ) * self.resolutionX )
+                if bitToAdd >= maxArraySize or bitToAdd < 0:
+                    sys.exit( "Bottom border bit outside EncodingWidth size." )
+                else:
+                    localBitRep.append( bitToAdd )
+
+        # Ball bits.
+        if Within( ballX, centerX - ( localDimX / 2 ) - ( self.ballWidth * 10 ), centerX + ( localDimX / 2 ) + ( self.ballWidth * 10 ), False ) and Within( ballY, centerY - ( localDimY / 2 ) - ( self.ballHeight * 10 ), centerY + ( localDimY / 2 ) + ( self.ballHeight * 10 ), False ):
+            for x in range( self.ballWidth * 20 ):
+                for y in range( self.ballHeight * 20 ):
+                    if Within( ballX - ( self.ballWidth * 10 ) + x, centerX - ( localDimX / 2 ), centerX + ( localDimX / 2 ), False ) and Within( ballY - ( self.ballHeight * 10 ) + y, centerY - ( localDimY / 2 ), centerY + ( localDimY / 2 ), False ):
+                        bitX = ballX - ( self.ballWidth * 10 ) + x - centerX + ( localDimX / 2 )
+                        bitY = ballY - ( self.ballHeight * 10 ) + y - centerY + ( localDimY / 2 )
+                        bitToAdd = int( bitX / scaleX ) + ( int( bitY / scaleY ) * self.resolutionX )
+                        if bitToAdd >= maxArraySize or bitToAdd < 0:
+                            sys.exit( "Ball bit outside EncodingWidth size." )
+                        else:
+                            localBitRep.append( bitToAdd )
+
+#        self.PrintBitRep( localBitRep, self.resolutionX, self.resolutionY )
+
+        bitRepSDR = SDR( maxArraySize )
+        bitRepSDR.sparse = numpy.unique( localBitRep )
+        return bitRepSDR
+
+    def EncodeSenseData ( self, ballX, ballY, centerX, centerY, localDimX, localDimY ):
     # Encodes sense data as an SDR and returns it.
 
-        # Now we call the encoders to create bit representations for each value, and encode them.
-        localBitsX   = self.localEncoderX.encode( localX )
-        localBitsY   = self.localEncoderY.encode( localY )
-        centerBitsX  = self.centerEncoderX.encode( centerX )
-        centerBitsY  = self.centerEncoderY.encode( centerY )
+        centerXBits = self.centerXEncoder.encode( centerX )
+        centerYBits = self.centerYEncoder.encode( centerY )
+        bitRepresentation = self.BuildLocalBitRep( localDimX, localDimY, centerX, centerY, ballX, ballY )
 
-        # Concatenate all these encodings into one large encoding for Spatial Pooling.
-        encoding = SDR( self.encodingWidth ).concatenate( [ localBitsX, localBitsY, centerBitsX, centerBitsY ] )
+        encoding = SDR( self.encodingWidth ).concatenate( [ bitRepresentation, centerXBits, centerYBits ] )
         senseSDR = SDR( self.sp.getColumnDimensions() )
         self.sp.compute( encoding, True, senseSDR )
 
@@ -140,7 +208,7 @@ class BallAgent:
 
         if Within( secondLast[ 0 ] - last[ 0 ], -self.localDimX, self.localDimX, True ):
             if Within( secondLast[ 1 ] - last[ 1 ], -self.localDimY, self.localDimY, True ):
-                secondLastSDR = self.EncodeSenseData( secondLast[ 0 ] - last[ 0 ], secondLast[ 1 ] - last[ 1 ], last[ 0 ], last[ 1 ] )
+                secondLastSDR = self.EncodeSenseData( secondLast[ 0 ], secondLast[ 1 ], last[ 0 ], last[ 1 ], self.localDimX, self.localDimY )
 
                 # Feed x and y position into classifier to learn.
                 # Classifier can only take positive input, so need to transform ball origin.
@@ -153,7 +221,7 @@ class BallAgent:
                 self.tp.activateDendrites( learn = doLearn )
 
         # Generate SDR for last sense data by feeding sense data into SP with learning.
-        lastSDR = self.EncodeSenseData( 0, 0, last[ 0 ], last[ 1 ] )
+        lastSDR = self.EncodeSenseData( 0, 0, last[ 0 ], last[ 1 ], self.localDimX, self.localDimY )
 
         if doLearn:
             self.xPosition.learn( pattern = lastSDR, classification = int( self.localDimX / 2 ) )
@@ -165,7 +233,7 @@ class BallAgent:
         if Within( present[ 0 ] - last[ 0 ], -self.localDimX, self.localDimX, True ):
             if Within( present[ 1 ] - last[ 1 ], -self.localDimY, self.localDimY, True ):
                 # Generate SDR for last sense data by feeding sense data into SP with learning.
-                senseSDR = self.EncodeSenseData( present[ 0 ] - last[ 0 ], present[ 1 ] - last[ 1 ], last[ 0 ], last[ 1 ] )
+                senseSDR = self.EncodeSenseData( present[ 0 ], present[ 1 ], last[ 0 ], last[ 1 ], self.localDimX, self.localDimY )
 
                 if doLearn:
                     self.xPosition.learn( pattern = senseSDR, classification = present[ 0 ] - last[ 0 ] + int( self.localDimX / 2 ) )
@@ -181,11 +249,11 @@ class BallAgent:
 
         if Within( secondLast[ 0 ] - last[ 0 ], -self.localDimX, self.localDimX, True ):
             if Within( secondLast[ 1 ] - last[ 1 ], -self.localDimY, self.localDimY, True ):
-                secondLastSDR = self.EncodeSenseData( secondLast[ 0 ] - last[ 0 ], secondLast[ 1 ] - last[ 1 ], last[ 0 ], last[ 1 ] )
+                secondLastSDR = self.EncodeSenseData( secondLast[ 0 ], secondLast[ 1 ], last[ 0 ], last[ 1 ], self.localDimX, self.localDimY )
                 self.tp.compute( secondLastSDR, learn = doLearn )
                 self.tp.activateDendrites( learn = doLearn )
 
-        lastSDR = self.EncodeSenseData( 0, 0, last[ 0 ], last[ 1 ] )
+        lastSDR = self.EncodeSenseData( 0, 0, last[ 0 ], last[ 1 ], self.localDimX, self.localDimY )
         self.tp.compute( lastSDR, learn = doLearn )
         self.tp.activateDendrites( learn = doLearn )
         predictCellsTP = self.tp.getPredictiveCells()
@@ -196,17 +264,17 @@ class BallAgent:
         positionX = numpy.argmax( self.xPosition.infer( pattern = stepSenseSDR ) ) - int( self.localDimX / 2 )
         positionY = numpy.argmax( self.yPosition.infer( pattern = stepSenseSDR ) ) - int( self.localDimY / 2 )
 
-        return [ last[ 0 ] + positionX, last[ 1 ] + positionY ]
+        return [ last[ 0 ] + positionX, last[ 1 ] + positionY, last[ 2 ] ]
 
-    def Brain ( self, ballX, ballY ):
+    def Brain ( self, ballX, ballY, paddleY ):
     # Agents brain center.
 
-        self.LearnTimeStep( self.memBuffer[ -2 ], self.memBuffer[ -1 ], [ ballX, ballY ], True )
-
-        # Set present ball coordinates for next time-step.
-        self.memBuffer.append( [ ballX, ballY ] )
+        # Save present ball coordinates in memory.
+        self.memBuffer.append( [ ballX, ballY, paddleY ] )
         while len( self.memBuffer ) > self.maxMemoryDist:
             self.memBuffer.pop( 0 )
+
+        self.LearnTimeStep( self.memBuffer[ -3 ], self.memBuffer[ -2 ], self.memBuffer[ -1 ], True )
 
         # Store last and present locations.
         self.predPositions.clear()
