@@ -22,11 +22,9 @@ wn.setup( width = screenWidth, height = screenHeight )
 wn.tracer( 0 )
 
 # Set up ball
-xSpeed = random.choice( [ -20, 20 ] )       # Speed for ball.
-ySpeed = random.choice( [ -20, 20 ] )
-
 ballHeight  = 1                            # Stretch of ball
 ballWidth   = 1
+ballSpeed = 20
 
 ball = turtle.Turtle()
 ball.speed( 0 )
@@ -35,8 +33,8 @@ ball.color( "white" )
 ball.shapesize( stretch_wid = ballHeight, stretch_len = ballWidth )
 ball.penup()
 ball.goto( 0, 0 )
-ball.dx = xSpeed
-ball.dy = ySpeed
+ball.dx = random.choice( [ -ballSpeed, ballSpeed ] )
+ball.dy = random.choice( [ -ballSpeed, ballSpeed ] )
 
 # Paddles
 paddleHeight  = 5                            # Stretch of paddles
@@ -48,7 +46,7 @@ paddle_a.shape( "square" )
 paddle_a.color( "white" )
 paddle_a.shapesize( stretch_wid = paddleHeight, stretch_len = paddleWidth )
 paddle_a.penup()
-paddle_a.goto( -350, -100 )
+paddle_a.goto( -350, -140 )
 
 paddle_b = turtle.Turtle()
 paddle_b.speed( 0 )
@@ -56,13 +54,13 @@ paddle_b.shape( "square" )
 paddle_b.color( "white" )
 paddle_b.shapesize( stretch_wid = paddleHeight, stretch_len = paddleWidth )
 paddle_b.penup()
-paddle_b.goto( 350, 240 )
+paddle_b.goto( 350, 140 )
 
 # Create play agents------------------------------------------------------------
 ballAgent = BallAgent( 'BallAgent', screenHeight, screenWidth, ballHeight, ballWidth, paddleHeight, paddleWidth )
 
 # Set up pred locations.
-drawLength = ballAgent.maxMemoryDist
+drawLength = ballAgent.maxPredLocations
 placeCellsDraw = []
 for i in range( drawLength ):
     currPlaceDraw = turtle.Turtle( )
@@ -73,15 +71,6 @@ for i in range( drawLength ):
     currPlaceDraw.penup( )
     currPlaceDraw.goto( 0, 0 )
     placeCellsDraw.append( currPlaceDraw )
-
-# Set up agent attention square.
-#attentSqDraw = turtle.Turtle( )
-#attentSqDraw.speed( 0 )
-#attentSqDraw.shape( "square" )
-#attentSqDraw.color( "red" )
-#attentSqDraw.shapesize( stretch_wid = ballAgent.localDimX / 20, stretch_len = ballAgent.localDimY / 20 )
-#attentSqDraw.penup( )
-#attentSqDraw.goto( ballAgent.centerX, ballAgent.centerY )
 
 # Functions---------------------------------------------------------------------
 def Within ( value, minimum, maximum ):
@@ -112,34 +101,48 @@ while True:
 
     # Border checking left and right.
     if ball.xcor() > int( screenWidth / 2 ) - ( ballWidth * 10 ):
-#        ball.goto(0, 0)
-        ball.setx( int( screenWidth / 2 ) - ( ballWidth * 10 ) )
+        ball.goto(0, 0)
+#        ball.setx( int( screenWidth / 2 ) - ( ballWidth * 10 ) )
         ball.dx *= -1
-#        ball.dy *= random.choice( [ -1, 1 ] )
+        ball.dy *= random.choice( [ -1, 1 ] )
 
     elif ball.xcor() < -int( screenWidth / 2 ) + ( ballWidth * 10 ):
-#        ball.goto(0, 0)
-        ball.setx( -int( screenWidth / 2 ) + ( ballWidth * 10 ) )
+        ball.goto(0, 0)
+#        ball.setx( -int( screenWidth / 2 ) + ( ballWidth * 10 ) )
         ball.dx *= -1
-#        ball.dy *= random.choice( [ -1, 1 ] )
+        ball.dy *= random.choice( [ -1, 1 ] )
 
-    # Paddle and ball collisions
-#    if ball.xcor() < -340 and ball.ycor() < paddle_a.ycor() + 50 and ball.ycor() > paddle_a.ycor() - 50:
-#        # Ball hits paddle A
-#        ball.dx *= -1
-#        ball.goto( -340, ball.ycor() )
+    # Paddle and ball collisions.
+    if ball.xcor() < -340 and ball.ycor() < paddle_a.ycor() + 50 and ball.ycor() > paddle_a.ycor() - 50:
+        # Ball hits paddle A
+        ball.dx *= -1
+        ball.goto( -340, ball.ycor() )
 
-#    elif ball.xcor() > 340 and ball.ycor() < paddle_b.ycor() + 50 and ball.ycor() > paddle_b.ycor() - 50:
-#        # Ball hits paddle B
-#        ball.dx *= -1
-#        ball.goto( 340, ball.ycor() )
+    elif ball.xcor() > 340 and ball.ycor() < paddle_b.ycor() + 50 and ball.ycor() > paddle_b.ycor() - 50:
+        # Ball hits paddle B
+        ball.dx *= -1
+        ball.goto( 340, ball.ycor() )
 
     # Run each agents learning algorithm and produce predictions.
-    ballAgent.Brain( ball.xcor(), ball.ycor(), paddle_a.ycor() )
+    paddleMove = ballAgent.Brain( ball.xcor(), ball.ycor(), paddle_a.ycor(), paddle_b.ycor() )
 
-    # Draw attention square for ball agent.
-#    attentSqDraw.setx( ballAgent.centerX )
-#    attentSqDraw.sety( ballAgent.centerY )
+    # Move paddles.
+    if paddleMove[ 0 ] == 0:
+        paddle_a.sety( paddle_a.ycor() + 20 )
+        if paddle_a.ycor() >= screenHeight / 2:
+            paddle_a.sety( screenHeight / 2 )
+    elif paddleMove[ 0 ] == 2:
+        paddle_a.sety( paddle_a.ycor() - 20 )
+        if paddle_a.ycor() <= -screenHeight / 2:
+            paddle_a.sety( -screenHeight / 2 )
+    if paddleMove[ 1 ] == 0:
+        paddle_b.sety( paddle_b.ycor() + 20 )
+        if paddle_b.ycor() >= screenHeight / 2:
+            paddle_b.sety( screenHeight / 2 )
+    elif paddleMove[ 1 ] == 2:
+        paddle_b.sety( paddle_b.ycor() - 20 )
+        if paddle_b.ycor() <= -screenHeight / 2:
+            paddle_b.sety( -screenHeight / 2 )
 
     # Draw predictions for ball agent.
     for i in range( drawLength ):
