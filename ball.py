@@ -6,7 +6,7 @@
 import numpy
 import random
 
-from agent_ball import BallAgent
+from agent_ball_proto import BallAgent
 
 # Dimensions of screen.
 screenWidth  = 800
@@ -101,16 +101,16 @@ while True:
 
     # Border checking left and right.
     if ball.xcor() > int( screenWidth / 2 ) - ( ballWidth * 10 ):
-        ball.goto(0, 0)
-#        ball.setx( int( screenWidth / 2 ) - ( ballWidth * 10 ) )
+#        ball.goto(0, 0)
+        ball.setx( int( screenWidth / 2 ) - ( ballWidth * 10 ) )
         ball.dx *= -1
-        ball.dy *= random.choice( [ -1, 1 ] )
+#        ball.dy *= random.choice( [ -1, 1 ] )
 
     elif ball.xcor() < -int( screenWidth / 2 ) + ( ballWidth * 10 ):
-        ball.goto(0, 0)
-#        ball.setx( -int( screenWidth / 2 ) + ( ballWidth * 10 ) )
+#        ball.goto(0, 0)
+        ball.setx( -int( screenWidth / 2 ) + ( ballWidth * 10 ) )
         ball.dx *= -1
-        ball.dy *= random.choice( [ -1, 1 ] )
+#        ball.dy *= random.choice( [ -1, 1 ] )
 
     # Paddle and ball collisions.
     if ball.xcor() < -340 and ball.ycor() < paddle_a.ycor() + 50 and ball.ycor() > paddle_a.ycor() - 50:
@@ -124,7 +124,7 @@ while True:
         ball.goto( 340, ball.ycor() )
 
     # Run each agents learning algorithm and produce predictions.
-    paddleMove = ballAgent.Brain( ball.xcor(), ball.ycor(), paddle_a.ycor(), paddle_b.ycor() )
+    paddleMove = ballAgent.Brain( ball.xcor(), ball.ycor(), ball.dx, ball.dy, paddle_a.ycor(), paddle_b.ycor() )
 
     # Move paddles.
     if paddleMove[ 0 ] == 0:

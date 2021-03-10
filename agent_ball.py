@@ -28,7 +28,7 @@ class BallAgent:
     localDimX   = 100
     localDimY   = 100
 
-    maxPredLocations = 10
+    maxPredLocations = 7
     maxMemoryDist = 10
 
     def __init__( self, name, screenHeight, screenWidth, ballHeight, ballWidth, paddleHeight, paddleWidth ):
@@ -124,17 +124,16 @@ class BallAgent:
 
         self.ballLocalXClass    = Classifier( alpha = 1 )
         self.ballLocalYClass    = Classifier( alpha = 1 )
-        self.ballGlobalXClass   = Classifier( alpha = 1 )
-        self.ballGlobalYClass   = Classifier( alpha = 1 )
-        self.ballGlobalTClass   = Classifier( alpha = 1 )
+        self.ballLocalTClass    = Classifier( alpha = 1 )
 
         self.paddleALocalYClass = Classifier( alpha = 1 )
         self.paddleBLocalYClass = Classifier( alpha = 1 )
+
         self.paddleAMotorClass  = Classifier( alpha = 1 )
         self.paddleBMotorClass  = Classifier( alpha = 1 )
 
         self.predPositions = []
-        self.memBuffer = [ [ 0, 0, 0, 0, 1, 1 ] ] * self.maxMemoryDist
+        self.memBuffer = [ [ 0, 0, 0, 0, 0, 0, 1, 1 ] ] * self.maxMemoryDist
 
     def EncodeSenseData ( self, ballX, ballY, paddleAY, paddleBY, centerX, centerY ):
     # Encodes sense data as an SDR and returns it.
@@ -170,47 +169,65 @@ class BallAgent:
 
         return senseSDR
 
-    def EncodeItLearnIt( self, ballX, ballY, paddleAY, paddleBY, centerX, centerY, chosenMotor ):
+    def EncodeItLearnIt( self, ballX, ballY, ballVelX, ballVelY, paddleAY, paddleBY, centerX, centerY, chosenMotor, learnIt ):
     # Performs learning on the 1-step of the 3-step sequence.
 
         thisSDR = self.EncodeSenseData( ballX, ballY, paddleAY, paddleBY, centerX, centerY )
 
+        # Feed SDR into tp.
+        self.tp.compute( thisSDR, learn = learnIt )
+        self.tp.activateDendrites( learn = learnIt )
+        activeCellsTP = self.tp.getActiveCells()
+
         # Feed x and y position into classifier to learn ball and paddle positions.
         # Classifier can only take positive input, so need to transform origin.
-        if ballX !=  None and ballY != None and Within( ballX - centerX, -int( self.localDimX / 2 ), int( self.localDimX / 2 ), False ) and Within( ballY - centerY, -int( self.localDimY / 2 ), int( self.localDimY / 2 ), False ):
-            self.ballLocalXClass.learn( pattern = thisSDR, classification = int( ballX - centerX + ( self.localDimX / 2 ) ) )
-            self.ballLocalYClass.learn( pattern = thisSDR, classification = int( ballY - centerY + ( self.localDimY / 2 ) ) )
-        if paddleAY != None and Within( -350 - centerX, -int( self.localDimX / 2 ), int( self.localDimX / 2 ), False ) and Within( paddleAY - centerY, -int( self.localDimY / 2 ), int( self.localDimY / 2 ), False ):
-            self.paddleALocalYClass.learn( pattern = thisSDR, classification = int( paddleAY - centerY + ( self.localDimY / 2 ) ) )
-            self.paddleAMotorClass.learn( pattern = thisSDR, classification = chosenMotor )
-        if paddleBY != None and Within( 350 - centerX, -int( self.localDimX / 2 ), int( self.localDimX / 2 ), False ) and Within( paddleBY - centerY, -int( self.localDimY / 2 ), int( self.localDimY / 2 ), False ):
-            self.paddleBLocalYClass.learn( pattern = thisSDR, classification = int( paddleBY - centerY + ( self.localDimY / 2 ) ) )
-            self.paddleBMotorClass.learn( pattern = thisSDR, classification = chosenMotor )
+        if learnIt:
+            if ballX !=  None and ballY != None and Within( ballX - centerX, -int( self.localDimX / 2 ), int( self.localDimX / 2 ), False ) and Within( ballY - centerY, -int( self.localDimY / 2 ), int( self.localDimY / 2 ), False ):
+                self.ballLocalXClass.learn( pattern = activeCellsTP, classification = ballVelX + 100 )
+                self.ballLocalYClass.learn( pattern = activeCellsTP, classification = ballVelY + 100 )
 
-        # Feed SDR into tp.
-        self.tp.compute( thisSDR, learn = True )
-        self.tp.activateDendrites( learn = True )
+            if paddleAY != None and Within( -350 - centerX, -int( self.localDimX / 2 ), int( self.localDimX / 2 ), False ) and Within( paddleAY - centerY, -int( self.localDimY / 2 ), int( self.localDimY / 2 ), False ):
+                self.paddleALocalYClass.learn( pattern = thisSDR, classification = int( paddleAY - centerY + ( self.localDimY / 2 ) ) )
+                self.paddleAMotorClass.learn( pattern = thisSDR, classification = chosenMotor )
+            if paddleBY != None and Within( 350 - centerX, -int( self.localDimX / 2 ), int( self.localDimX / 2 ), False ) and Within( paddleBY - centerY, -int( self.localDimY / 2 ), int( self.localDimY / 2 ), False ):
+                self.paddleBLocalYClass.learn( pattern = thisSDR, classification = int( paddleBY - centerY + ( self.localDimY / 2 ) ) )
+                self.paddleBMotorClass.learn( pattern = thisSDR, classification = chosenMotor )
 
-    def LearnTimeStepBall ( self, secondLast, last, present, jump ):
+    def EncodeItPredictIt( self ):
+    # Run the predictive cells through tp to get the next predictive cells, and extract the position displacement.
+
+        predictCellsTP = self.tp.getPredictiveCells()
+
+
+
+    def LearnTimeStepBall ( self ):
     # Learn the three time-step data for ball, centered around assigned center position.
 
         self.tp.reset()
-        self.EncodeItLearnIt( secondLast[ 0 ], secondLast[ 1 ], None, None, last[ 0 ], last[ 1 ], None )
-        self.EncodeItLearnIt( last[ 0 ], last[ 1 ], None, None, last[ 0 ], last[ 1 ], None )
-        self.EncodeItLearnIt( present[ 0 ], present[ 1 ], None, None, last[ 0 ], last[ 1 ], None )
-#        self.EncodeItLearnIt( jump[ 0 ], jump[ 1 ], None, None, jump[ 0 ], jump[ 1 ], None )
+        for step in range( int( self.maxMemoryDist / 3 ) ):
+            self.EncodeItLearnIt( self.memBuffer[ ( step * 3 ) ][ 0 ], self.memBuffer[ ( step * 3 ) ][ 1 ], self.memBuffer[ ( step * 3 ) ][ 2 ], self.memBuffer[ ( step * 3 ) ][ 3 ], None, None, self.memBuffer[ ( step * 3 ) + 1 ][ 0 ], self.memBuffer[ ( step * 3 ) + 1 ][ 1 ], None, True )
+            self.EncodeItLearnIt( self.memBuffer[ ( step * 3 ) + 1 ][ 0 ], self.memBuffer[ ( step * 3 ) + 1 ][ 1 ], self.memBuffer[ ( step * 3 ) + 1 ][ 2 ], self.memBuffer[ ( step * 3 ) + 1 ][ 3 ], None, None, self.memBuffer[ ( step * 3 ) + 1 ][ 0 ], self.memBuffer[ ( step * 3 ) + 1 ][ 1 ], None, True )
+            self.EncodeItLearnIt( self.memBuffer[ ( step * 3 ) + 2 ][ 0 ], self.memBuffer[ ( step * 3 ) + 2 ][ 1 ], self.memBuffer[ ( step * 3 ) + 2 ][ 2 ], self.memBuffer[ ( step * 3 ) + 2 ][ 3 ], None, None, self.memBuffer[ ( step * 3 ) + 1 ][ 0 ], self.memBuffer[ ( step * 3 ) + 1 ][ 1 ], None, True )
 
-    def LearnTimeStepPaddle ( self, last, present, centerX, centerY, chosenMotor ):
-    # Learn motion of paddle in tune with chosen motor function.
-
-        self.tp.reset()
-        self.EncodeItLearnIt( None, None, last[ 2 ], last[ 3 ], centerX, centerY, chosenMotor )
-        self.EncodeItLearnIt( None, None, present[ 2 ], present[ 3 ], centerX, centerY, chosenMotor )
-
-    def PredictTimeStep ( self, secondLast, last ):
-    # Train time-step data, from secondlast to last, centered around last, and then predict next position and return.
+    def PredictTimeStepBall ( self ):
+    # Feed in initial sequence and then run through to all position predictions.
 
         self.tp.reset()
+        # Feed in initial sequence, most recent three steps.
+        self.EncodeItLearnIt( self.memBuffer[ -3 ][ 0 ], self.memBuffer[ -3 ][ 1 ], self.memBuffer[ -3 ][ 2 ], self.memBuffer[ -3 ][ 3 ], None, None, self.memBuffer[ -2 ][ 0 ], self.memBuffer[ -2 ][ 1 ], None, False )
+        self.EncodeItLearnIt( self.memBuffer[ -2 ][ 0 ], self.memBuffer[ -2 ][ 1 ], self.memBuffer[ -2 ][ 2 ], self.memBuffer[ -2 ][ 3 ], None, None, self.memBuffer[ -2 ][ 0 ], self.memBuffer[ -2 ][ 1 ], None, False )
+        self.EncodeItLearnIt( self.memBuffer[ -1 ][ 0 ], self.memBuffer[ -1 ][ 1 ], self.memBuffer[ -1 ][ 2 ], self.memBuffer[ -1 ][ 3 ], None, None, self.memBuffer[ -2 ][ 0 ], self.memBuffer[ -2 ][ 1 ], None, False )
+
+        # Predict the remaining steps in the sequence
+        for step in range( self.maxPredLocations ):
+            nextPosition = self.PredictTimeStep( self.predPositions[ -2 ], self.predPositions[ -1 ] )
+            if Within( nextPosition[ 0 ], -self.screenWidth / 2, self.screenWidth / 2, True ):
+                if Within( nextPosition[ 1 ], -self.screenHeight / 2, self.screenHeight / 2, True ):
+                    self.predPositions.append( nextPosition )
+                else:
+                    break
+            else:
+                break
 
         secondLastSDR = self.EncodeSenseData( secondLast[ 0 ], secondLast[ 1 ], secondLast[ 2 ], secondLast[ 3 ], last[ 0 ], last[ 1 ] )
         self.tp.compute( secondLastSDR, learn = False )
@@ -229,72 +246,68 @@ class BallAgent:
 
         return [ last[ 0 ] + positionX, last[ 1 ] + positionY, None, None ]
 
-    def Brain ( self, ballX, ballY, paddleAY, paddleBY ):
+    def LearnTimeStepPaddle ( self, last, present, centerX, centerY, chosenMotor ):
+    # Learn motion of paddle in tune with chosen motor function.
+
+        self.tp.reset()
+        self.EncodeItLearnIt( None, None, last[ 4 ], last[ 5 ], centerX, centerY, chosenMotor )
+        self.EncodeItLearnIt( None, None, present[ 4 ], present[ 5 ], centerX, centerY, chosenMotor )
+
+    def Brain ( self, ballX, ballY, ballVelX, ballVelY, paddleAY, paddleBY ):
     # Agents brain center.
 
         # Set present ball coordinates for next time-step.
-        self.memBuffer.append( [ ballX, ballY, paddleAY, paddleBY, 1, 1 ] )
+        self.memBuffer.append( [ ballX, ballY, ballVelX, ballVelY, paddleAY, paddleBY, 1, 1 ] )
         while len( self.memBuffer ) > self.maxMemoryDist:
             self.memBuffer.pop( 0 )
 
         # Learn 3-step sequence, and jump, centered around ball. Do this back in memory.
-        self.LearnTimeStepBall( )
+        self.LearnTimeStepBall()
 
         # Store last and present locations.
         self.predPositions.clear()
         self.predPositions.append( self.memBuffer[ -2 ] )
         self.predPositions.append( self.memBuffer[ -1 ] )
 
-        # Predict jump position.
-
+        # Predict next time step locations and store them in predPositions.
+        self.PredictTimeStepBall()
 
         paddleADirect = False
         paddleBDirect = False
         chosenMotorA = 1
         chosenMotorB = 1
 
-        # Predict next 10 time step locations and store them.
-        for step in range( self.maxPredLocations ):
-            nextPosition = self.PredictTimeStep( self.predPositions[ -2 ], self.predPositions[ -1 ] )
-            if Within( nextPosition[ 0 ], -self.screenWidth / 2, self.screenWidth / 2, True ):
-                if Within( nextPosition[ 1 ], -self.screenHeight / 2, self.screenHeight / 2, True ):
-                    self.predPositions.append( nextPosition )
-
-                    # If ball is predicted to fall off then try to move paddle there.
-                    if nextPosition[ 0 ] <= -330:
-                        paddleADirect = True
-                        if paddleAY > nextPosition[ 1 ]:
-                            chosenMotorA = 2
-                            self.memBuffer[ -1 ][ 4 ] = chosenMotorA
-                        elif paddleAY < nextPosition[ 1 ]:
-                            chosenMotorA = 0
-                            self.memBuffer[ -1 ][ 4 ] = chosenMotorA
-                        break
-                    elif nextPosition[ 0 ] >= 330:
-                        paddleBDirect = True
-                        if paddleBY > nextPosition[ 1 ]:
-                            chosenMotorB = 2
-                            self.memBuffer[ -1 ][ 5 ] = chosenMotorB
-                        elif paddleBY < nextPosition[ 1 ]:
-                            chosenMotorB = 0
-                            self.memBuffer[ -1 ][ 5 ] = chosenMotorB
-                        break
-                else:
-                    break
-            else:
-                break
+        # If ball is predicted to fall off then try to move paddle there.
+        if self.predPositions[ -1 ][ 0 ] <= -330:
+            paddleADirect = True
+            if paddleAY > self.predPositions[ -1 ][ 1 ]:
+                chosenMotorA = 2
+                self.memBuffer[ -1 ][ 6 ] = chosenMotorA
+            elif paddleAY < self.predPositions[ -1 ][ 1 ]:
+                chosenMotorA = 0
+                self.memBuffer[ -1 ][ 6 ] = chosenMotorA
+            break
+        elif self.predPositions[ -1 ][ 0 ] >= 330:
+            paddleBDirect = True
+            if paddleBY > self.predPositions[ -1 ][ 1 ]:
+                chosenMotorB = 2
+                self.memBuffer[ -1 ][ 7 ] = chosenMotorB
+            elif paddleBY < self.predPositions[ -1 ][ 1 ]:
+                chosenMotorB = 0
+                self.memBuffer[ -1 ][ 7 ] = chosenMotorB
+            break
 
         # If we aren't directing paddles movement then just learn paddle movement with random motion.
         if not paddleADirect:
             chosenMotorA = random.choice( [ 0, 1, 2 ] )
-            self.memBuffer[ -1 ][ 4 ] = chosenMotorA
+            self.memBuffer[ -1 ][ 6 ] = chosenMotorA
         if not paddleBDirect:
             chosenMotorB = random.choice( [ 0, 1, 2 ] )
-            self.memBuffer[ -1 ][ 5 ] = chosenMotorB
+            self.memBuffer[ -1 ][ 7 ] = chosenMotorB
 
         # Learn last 2-step sequence centered around paddle_a.
-        self.LearnTimeStepPaddle( self.memBuffer[ -2 ], self.memBuffer[ -1 ], -350, self.memBuffer[ -2 ][ 2 ], self.memBuffer[ -2 ][ 4 ] )
+        self.LearnTimeStepPaddle( self.memBuffer[ -2 ], self.memBuffer[ -1 ], -350, self.memBuffer[ -2 ][ 4 ], self.memBuffer[ -2 ][ 6 ] )
         # Learn last 2-step sequence centered around paddle_b.
-        self.LearnTimeStepPaddle( self.memBuffer[ -2 ], self.memBuffer[ -1 ], 350, self.memBuffer[ -2 ][ 3 ], self.memBuffer[ -2 ][ 5 ] )
+        self.LearnTimeStepPaddle( self.memBuffer[ -2 ], self.memBuffer[ -1 ], 350, self.memBuffer[ -2 ][ 5 ], self.memBuffer[ -2 ][ 7 ] )
 
         return [ chosenMotorA, chosenMotorB ]
