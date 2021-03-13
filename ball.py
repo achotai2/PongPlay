@@ -113,15 +113,15 @@ while True:
 #        ball.dy *= random.choice( [ -1, 1 ] )
 
     # Paddle and ball collisions.
-    if ball.xcor() < -340 and ball.ycor() < paddle_a.ycor() + 50 and ball.ycor() > paddle_a.ycor() - 50:
-        # Ball hits paddle A
-        ball.dx *= -1
-        ball.goto( -340, ball.ycor() )
+#    if ball.xcor() < -340 and ball.ycor() < paddle_a.ycor() + 50 and ball.ycor() > paddle_a.ycor() - 50:
+#        # Ball hits paddle A
+#        ball.dx *= -1
+#        ball.goto( -340, ball.ycor() )
 
-    elif ball.xcor() > 340 and ball.ycor() < paddle_b.ycor() + 50 and ball.ycor() > paddle_b.ycor() - 50:
-        # Ball hits paddle B
-        ball.dx *= -1
-        ball.goto( 340, ball.ycor() )
+#    elif ball.xcor() > 340 and ball.ycor() < paddle_b.ycor() + 50 and ball.ycor() > paddle_b.ycor() - 50:
+#        # Ball hits paddle B
+#        ball.dx *= -1
+#        ball.goto( 340, ball.ycor() )
 
     # Run each agents learning algorithm and produce predictions.
     paddleMove = ballAgent.Brain( ball.xcor(), ball.ycor(), ball.dx, ball.dy, paddle_a.ycor(), paddle_b.ycor() )

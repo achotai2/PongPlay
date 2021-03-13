@@ -41,6 +41,7 @@ class BallAgent:
         # Set up encoder parameters
         ballXEncodeParams    = ScalarEncoderParameters()
         ballYEncodeParams    = ScalarEncoderParameters()
+        ballTEncodeParams    = ScalarEncoderParameters()
         paddleEncodeParams   = ScalarEncoderParameters()
         wallXEncodeParams    = ScalarEncoderParameters()
         wallYEncodeParams    = ScalarEncoderParameters()
@@ -292,6 +293,7 @@ class BallAgent:
         for step in range( self.maxPredLocations - 3 ):
             # Get the predicted cells from tp.
             winnerCellsTP = self.tp.getWinnerCells()
+            predictCellsTP = self.tp.getPredictiveCells()
 
             shiftX = numpy.argmax( self.ballShiftXClass.infer( pattern = winnerCellsTP ) ) - 100
             shiftY = numpy.argmax( self.ballShiftYClass.infer( pattern = winnerCellsTP ) ) - 100
