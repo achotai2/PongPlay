@@ -6,7 +6,7 @@
 import numpy
 import random
 
-from agent_ball_proto import BallAgent
+from agent_ball import BallAgent
 
 # Dimensions of screen.
 screenWidth  = 800
@@ -73,13 +73,19 @@ for i in range( drawLength ):
     placeCellsDraw.append( currPlaceDraw )
 
 # Functions---------------------------------------------------------------------
-def Within ( value, minimum, maximum ):
+def Within ( value, minimum, maximum, equality ):
 # Checks if value is <= maximum and >= minimum.
 
-    if value <= maximum and value >= minimum:
-        return True
+    if equality:
+        if value <= maximum and value >= minimum:
+            return True
+        else:
+            return False
     else:
-        return False
+        if value < maximum and value > minimum:
+            return True
+        else:
+            return False
 
 while True:
 # Main game loop----------------------------------------------------------------
@@ -124,7 +130,7 @@ while True:
 #        ball.goto( 340, ball.ycor() )
 
     # Run each agents learning algorithm and produce predictions.
-    paddleMove = ballAgent.Brain( ball.xcor(), ball.ycor(), ball.dx, ball.dy, paddle_a.ycor(), paddle_b.ycor() )
+    paddleMove = ballAgent.Brain( ball.xcor(), ball.ycor(), paddle_a.ycor(), paddle_b.ycor() )
 
     # Move paddles.
     if paddleMove[ 0 ] == 0:
@@ -145,8 +151,8 @@ while True:
             paddle_b.sety( -screenHeight / 2 )
 
     # Draw predictions for ball agent.
-    for i in range( drawLength ):
-        if i <= len( ballAgent.predPositions ) - 1:
+    for i in range( len( ballAgent.predPositions ) ):
+        if Within( ballAgent.predPositions[ i ][ 0 ], -screenWidth / 2, screenWidth / 2, True ) and Within( ballAgent.predPositions[ i ][ 1 ], -screenHeight / 2, screenHeight / 2, True ):
             placeCellsDraw[ i ].setx( ballAgent.predPositions[ i ][ 0 ] )
             placeCellsDraw[ i ].sety( ballAgent.predPositions[ i ][ 1 ] )
         else:
