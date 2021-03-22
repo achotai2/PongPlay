@@ -6,7 +6,7 @@
 import numpy
 import random
 
-from agent_ball import BallAgent
+from agent_ball_proto import BallAgent
 
 # Dimensions of screen.
 screenWidth  = 800
@@ -39,6 +39,8 @@ ball.dy = random.choice( [ -ballSpeed, ballSpeed ] )
 # Paddles
 paddleHeight  = 5                            # Stretch of paddles
 paddleWidth   = 1
+paddleAMove = True
+paddleBMove = True
 
 paddle_a = turtle.Turtle()
 paddle_a.speed( 0 )
@@ -46,7 +48,7 @@ paddle_a.shape( "square" )
 paddle_a.color( "white" )
 paddle_a.shapesize( stretch_wid = paddleHeight, stretch_len = paddleWidth )
 paddle_a.penup()
-paddle_a.goto( -350, -140 )
+paddle_a.goto( -350, -180 )
 
 paddle_b = turtle.Turtle()
 paddle_b.speed( 0 )
@@ -54,7 +56,7 @@ paddle_b.shape( "square" )
 paddle_b.color( "white" )
 paddle_b.shapesize( stretch_wid = paddleHeight, stretch_len = paddleWidth )
 paddle_b.penup()
-paddle_b.goto( 350, 140 )
+paddle_b.goto( 350, 180 )
 
 # Create play agents------------------------------------------------------------
 ballAgent = BallAgent( 'BallAgent', screenHeight, screenWidth, ballHeight, ballWidth, paddleHeight, paddleWidth )
@@ -107,45 +109,49 @@ while True:
 
     # Border checking left and right.
     if ball.xcor() > int( screenWidth / 2 ) - ( ballWidth * 10 ):
-#        ball.goto(0, 0)
-        ball.setx( int( screenWidth / 2 ) - ( ballWidth * 10 ) )
+        ball.goto(0, 0)
+#        ball.setx( int( screenWidth / 2 ) - ( ballWidth * 10 ) )
         ball.dx *= -1
-#        ball.dy *= random.choice( [ -1, 1 ] )
+        ball.dy *= random.choice( [ -1, 1 ] )
+        paddleBMove = True
 
     elif ball.xcor() < -int( screenWidth / 2 ) + ( ballWidth * 10 ):
-#        ball.goto(0, 0)
-        ball.setx( -int( screenWidth / 2 ) + ( ballWidth * 10 ) )
+        ball.goto(0, 0)
+#        ball.setx( -int( screenWidth / 2 ) + ( ballWidth * 10 ) )
         ball.dx *= -1
-#        ball.dy *= random.choice( [ -1, 1 ] )
+        ball.dy *= random.choice( [ -1, 1 ] )
+        paddleAMove = True
 
     # Paddle and ball collisions.
-#    if ball.xcor() < -340 and ball.ycor() < paddle_a.ycor() + 50 and ball.ycor() > paddle_a.ycor() - 50:
-#        # Ball hits paddle A
-#        ball.dx *= -1
-#        ball.goto( -340, ball.ycor() )
+    if ball.xcor() < -340 and ball.ycor() < paddle_a.ycor() + 50 and ball.ycor() > paddle_a.ycor() - 50:
+        # Ball hits paddle A
+        ball.dx *= -1
+        ball.goto( -340, ball.ycor() )
+#        paddleAMove = False
 
-#    elif ball.xcor() > 340 and ball.ycor() < paddle_b.ycor() + 50 and ball.ycor() > paddle_b.ycor() - 50:
-#        # Ball hits paddle B
-#        ball.dx *= -1
-#        ball.goto( 340, ball.ycor() )
+    elif ball.xcor() > 340 and ball.ycor() < paddle_b.ycor() + 50 and ball.ycor() > paddle_b.ycor() - 50:
+        # Ball hits paddle B
+        ball.dx *= -1
+        ball.goto( 340, ball.ycor() )
+#        paddleBMove = False
 
     # Run each agents learning algorithm and produce predictions.
     paddleMove = ballAgent.Brain( ball.xcor(), ball.ycor(), paddle_a.ycor(), paddle_b.ycor() )
 
     # Move paddles.
-    if paddleMove[ 0 ] == 0:
+    if paddleMove[ 0 ] == 0 and paddleAMove:
         paddle_a.sety( paddle_a.ycor() + 20 )
         if paddle_a.ycor() >= screenHeight / 2:
             paddle_a.sety( screenHeight / 2 )
-    elif paddleMove[ 0 ] == 2:
+    elif paddleMove[ 0 ] == 2 and paddleAMove:
         paddle_a.sety( paddle_a.ycor() - 20 )
         if paddle_a.ycor() <= -screenHeight / 2:
             paddle_a.sety( -screenHeight / 2 )
-    if paddleMove[ 1 ] == 0:
+    if paddleMove[ 1 ] == 0 and paddleBMove:
         paddle_b.sety( paddle_b.ycor() + 20 )
         if paddle_b.ycor() >= screenHeight / 2:
             paddle_b.sety( screenHeight / 2 )
-    elif paddleMove[ 1 ] == 2:
+    elif paddleMove[ 1 ] == 2 and paddleBMove:
         paddle_b.sety( paddle_b.ycor() - 20 )
         if paddle_b.ycor() <= -screenHeight / 2:
             paddle_b.sety( -screenHeight / 2 )
