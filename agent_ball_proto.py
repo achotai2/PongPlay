@@ -26,11 +26,14 @@ def Within ( value, minimum, maximum, equality ):
 
 class BallAgent:
 
-    localDimX   = 100
-    localDimY   = 100
+    localDimX   = 200
+    localDimY   = 200
 
-    maxPredLocations = 20
-    maxMemoryDist = 10
+    maxPredLocations = 60
+    maxStepsInPath   = 30
+    overlapThresh    = 0.1
+    maxMemoryDist    = 10
+    maxLocalPosSize  = 1000
 
     def __init__( self, name, screenHeight, screenWidth, ballHeight, ballWidth, paddleHeight, paddleWidth ):
 
@@ -45,6 +48,8 @@ class BallAgent:
         paddleEncodeParams   = ScalarEncoderParameters()
         wallXEncodeParams    = ScalarEncoderParameters()
         wallYEncodeParams    = ScalarEncoderParameters()
+        centerXEncodeParams  = ScalarEncoderParameters()
+        centerYEncodeParams  = ScalarEncoderParameters()
 
         ballXEncodeParams.activeBits = 21
         ballXEncodeParams.radius     = 20
@@ -81,15 +86,31 @@ class BallAgent:
         wallYEncodeParams.maximum    = int( self.localDimY / 2 )
         wallYEncodeParams.periodic   = False
 
+        centerXEncodeParams.activeBits = 11
+        centerXEncodeParams.radius     = 5
+        centerXEncodeParams.clipInput  = False
+        centerXEncodeParams.minimum    = -int( screenWidth / 2 )
+        centerXEncodeParams.maximum    = int( screenWidth / 2 )
+        centerXEncodeParams.periodic   = False
+
+        centerYEncodeParams.activeBits = 11
+        centerYEncodeParams.radius     = 5
+        centerYEncodeParams.clipInput  = False
+        centerYEncodeParams.minimum    = -int( screenHeight / 2 )
+        centerYEncodeParams.maximum    = int( screenHeight / 2 )
+        centerYEncodeParams.periodic   = False
+
         # Set up encoders
         self.ballEncoderX    = ScalarEncoder( ballXEncodeParams )
         self.ballEncoderY    = ScalarEncoder( ballYEncodeParams )
         self.paddleEncoderY  = ScalarEncoder( paddleEncodeParams )
         self.wallEncoderX    = ScalarEncoder( wallXEncodeParams )
         self.wallEncoderY    = ScalarEncoder( wallYEncodeParams )
+        self.centerEncoderX    = ScalarEncoder( centerXEncodeParams )
+        self.centerEncoderY    = ScalarEncoder( centerYEncodeParams )
 
         self.encodingWidth = ( self.ballEncoderX.size + self.ballEncoderY.size + self.wallEncoderX.size +
-            self.wallEncoderY.size + ( self.paddleEncoderY.size * 2 ) )
+            self.wallEncoderY.size + ( self.paddleEncoderY.size * 2 ) + self.centerEncoderX.size + self.centerEncoderY.size )
 
         self.sp = SpatialPooler(
             inputDimensions            = ( self.encodingWidth, ),
@@ -123,35 +144,30 @@ class BallAgent:
             seed                      = 42
         )
 
-        self.ballLocalXClass    = Classifier( alpha = 1 )
-        self.ballLocalYClass    = Classifier( alpha = 1 )
-        self.ballGlobalXClass   = Classifier( alpha = 1 )
-        self.ballGlobalYClass   = Classifier( alpha = 1 )
-        self.ballGlobalTClass   = Classifier( alpha = 1 )
-
-        self.paddleALocalYClass = Classifier( alpha = 1 )
-        self.paddleBLocalYClass = Classifier( alpha = 1 )
-        self.paddleAMotorClass  = Classifier( alpha = 1 )
-        self.paddleBMotorClass  = Classifier( alpha = 1 )
-
         self.predPositions = []
         self.memBuffer = [ [ 0, 0, 0, 0, 1, 1 ] ] * self.maxMemoryDist
 #        self.ballLocalPosForCell = [] * self.sp.getColumnDimensions()[ 0 ]
         self.ballCellForLocalPos = []
+        self.paddleAForLocalPos  = []
+        self.paddleBForLocalPos  = []
 
     def Overlap ( self, SDR1, SDR2 ):
     # Computes overlap score between two passed SDRs.
 
         overlap = 0
 
-        for cell1 in SDR1.sparse:
-            if cell1 in SDR2.sparse:
+        for cell1 in SDR1:
+            if cell1 in SDR2:
                 overlap += 1
 
         return overlap
 
     def EncodeSenseData ( self, ballX, ballY, paddleAY, paddleBY, centerX, centerY, learnIt ):
     # Encodes sense data as an SDR and returns it.
+
+        # Encode global location center bits.
+        centerBitsX = self.centerEncoderX.encode( centerX )
+        centerBitsY = self.centerEncoderY.encode( centerY )
 
         # Encode bit representations for wall bits.
         if Within( int( self.screenWidth / 2 ) - centerX, -int( self.localDimX / 2 ), int( self.localDimX / 2 ), True ):
@@ -188,7 +204,7 @@ class BallAgent:
             paddleBBitsY = SDR( self.paddleEncoderY.size )
 
         # Concatenate all these encodings into one large encoding for Spatial Pooling.
-        encoding = SDR( self.encodingWidth ).concatenate( [ ballBitsX, ballBitsY, paddleABitsY, paddleBBitsY, wallBitsX, wallBitsY ] )
+        encoding = SDR( self.encodingWidth ).concatenate( [ ballBitsX, ballBitsY, paddleABitsY, paddleBBitsY, wallBitsX, wallBitsY, centerBitsX, centerBitsY ] )
         senseSDR = SDR( self.sp.getColumnDimensions() )
         self.sp.compute( encoding, learnIt, senseSDR )
 
@@ -199,254 +215,261 @@ class BallAgent:
         return senseSDR
 
     def ClassifyLocalPos ( self, thisSDR, ballX, ballY, paddleAY, paddleBY, centerX, centerY ):
-    # Performs learning on the 1-step of the 3-step sequence.
+    # Classifies thisSDR for ball and paddle local position.
 
-        # Feed x and y position into classifier to learn ball and paddle positions.
-        # Classifier can only take positive input, so need to transform origin.
-        if ballX !=  None and ballY != None and Within( ballX - centerX, -int( self.localDimX / 2 ), int( self.localDimX / 2 ), True ) and Within( ballY - centerY, -int( self.localDimY / 2 ), int( self.localDimY / 2 ), True ):
-            self.ballLocalXClass.learn( pattern = thisSDR, classification = int( ballX - centerX + ( self.localDimX / 2 ) ) )
-            self.ballLocalYClass.learn( pattern = thisSDR, classification = int( ballY - centerY + ( self.localDimY / 2 ) ) )
+        if Within( ballX - centerX, -self.localDimX / 2, self.localDimX / 2, True ) and Within( ballY - centerY, -self.localDimY / 2, self.localDimY / 2, True ):
+            localBallX = ballX - centerX
+            localBallY = ballY - centerY
+        else:
+            localBallX = None
+            localBallY = None
 
+        if Within( -350 - centerX, -int( self.localDimX / 2 ), int( self.localDimX / 2 ), True ) and Within( paddleAY - centerY, -int( self.localDimY / 2 ), int( self.localDimY / 2 ), True ):
+            localPaddleAY = paddleAY - centerY
+        else:
+            localPaddleAY = None
+
+        if Within( 350 - centerX, -int( self.localDimX / 2 ), int( self.localDimX / 2 ), True ) and Within( paddleBY - centerY, -int( self.localDimY / 2 ), int( self.localDimY / 2 ), True ):
+            localPaddleBY = paddleBY - centerY
+        else:
+            localPaddleBY = None
+
+        if localBallX != None and localBallY != None:
             foundPos = False
             for localPos in self.ballCellForLocalPos:
-                if localPos[ 0 ] == ballX - centerX and localPos[ 1 ] == ballY - centerY:
-#                    for cell in thisSDR.sparse:
-#                        localPos[ 2 ][ cell ] += 1
-#                    localPos[ 3 ] += 1
-                    localPos[ 2 ].sparse = numpy.union1d( thisSDR.sparse, localPos[ 2 ].sparse )
+                if localPos[ 1 ] == localBallX and localPos[ 2 ] == localBallY:
                     foundPos = True
+
+                    localPos[ 0 ] = numpy.append( localPos[ 0 ], thisSDR.sparse )
+                    u, ind = numpy.unique( localPos[ 0 ], return_index = True )
+                    localPos[ 0 ] = u[ numpy.argsort( ind ) ]
+                    localPos[ 0 ] = u
+
+                while localPos[ 0 ].size > self.maxLocalPosSize:
+                    localPos[ 0 ] = numpy.delete( localPos[ 0 ], 0 )
+
             if not foundPos:
-                self.ballCellForLocalPos.append( [ ballX - centerX, ballY - centerY, thisSDR ] )
-#                self.ballCellForLocalPos.append( [ ballX - centerX, ballY - centerY, [ 0 ] * self.sp.getColumnDimensions()[ 0 ] , 1 ] )
-#                for cell in thisSDR.sparse:
-#                    self.ballCellForLocalPos[ -1 ][ 2 ][ cell ] += 1
+                self.ballCellForLocalPos.append( [ thisSDR.sparse, localBallX, localBallY ] )
 
-        if paddleAY != None and Within( -350 - centerX, -int( self.localDimX / 2 ), int( self.localDimX / 2 ), True ) and Within( paddleAY - centerY, -int( self.localDimY / 2 ), int( self.localDimY / 2 ), True ):
-            self.paddleALocalYClass.learn( pattern = thisSDR, classification = int( paddleAY - centerY + ( self.localDimY / 2 ) ) )
-        if paddleBY != None and Within( 350 - centerX, -int( self.localDimX / 2 ), int( self.localDimX / 2 ), True ) and Within( paddleBY - centerY, -int( self.localDimY / 2 ), int( self.localDimY / 2 ), True ):
-            self.paddleBLocalYClass.learn( pattern = thisSDR, classification = int( paddleBY - centerY + ( self.localDimY / 2 ) ) )
+        if localPaddleAY != None:
+            foundPos = False
+            for localPos in self.paddleAForLocalPos:
+                if localPos[ 1 ] == localPaddleAY:
+                    foundPos = True
 
-    def ClassifyMotor( self, thisSDR, centerX, chosenMotor ):
+                    localPos[ 0 ] = numpy.append( localPos[ 0 ], thisSDR.sparse )
+                    u, ind = numpy.unique( localPos[ 0 ], return_index = True )
+                    localPos[ 0 ] = u[ numpy.argsort( ind ) ]
+                    localPos[ 0 ] = u
 
-        if Within( -350 - centerX, -int( self.localDimX / 2 ), int( self.localDimX / 2 ), True ):
-            self.paddleAMotorClass.learn( pattern = thisSDR, classification = chosenMotor )
-        elif Within( 350 - centerX, -int( self.localDimX / 2 ), int( self.localDimX / 2 ), True ):
-            self.paddleBMotorClass.learn( pattern = thisSDR, classification = chosenMotor )
+                while localPos[ 0 ].size > self.maxLocalPosSize:
+                    localPos[ 0 ] = numpy.delete( localPos[ 0 ], 0 )
 
-    def LearnTimeStepBall ( self, secondLast, last, present ):
-    # Learn the three time-step data for ball, centered around assigned center position.
+            if not foundPos:
+                self.paddleAForLocalPos.append( [ thisSDR.sparse, localPaddleAY ] )
+
+        if localPaddleBY != None:
+            foundPos = False
+            for localPos in self.paddleBForLocalPos:
+                if localPos[ 1 ] == localPaddleBY:
+                    foundPos = True
+
+                    localPos[ 0 ] = numpy.append( localPos[ 0 ], thisSDR.sparse )
+                    u, ind = numpy.unique( localPos[ 0 ], return_index = True )
+                    localPos[ 0 ] = u[ numpy.argsort( ind ) ]
+                    localPos[ 0 ] = u
+
+                while localPos[ 0 ].size > self.maxLocalPosSize:
+                    localPos[ 0 ] = numpy.delete( localPos[ 0 ], 0 )
+
+            if not foundPos:
+                self.paddleBForLocalPos.append( [ thisSDR.sparse, localPaddleBY ] )
+
+#    def ClassifyMotor( self, thisSDR, centerX, chosenMotor ):
+#    # Classifies thisSDR for chosenMotor.
+#
+#        if Within( -350 - centerX, -int( self.localDimX / 2 ), int( self.localDimX / 2 ), True ):
+#            self.paddleAMotorClass.learn( pattern = thisSDR, classification = chosenMotor )
+#        elif Within( 350 - centerX, -int( self.localDimX / 2 ), int( self.localDimX / 2 ), True ):
+#            self.paddleBMotorClass.learn( pattern = thisSDR, classification = chosenMotor )
+
+    def LearnTimeStepBall ( self ):
+    # Learn the three time-step data for ball, centered around assigned last position.
+    # Repeat sequence for maxMemoryDist length.
 
         self.tp.reset()
-        thisSDR = self.EncodeSenseData( secondLast[ 0 ], secondLast[ 1 ], secondLast[ 2 ], secondLast[ 3 ], last[ 0 ], last[ 1 ], True )
-        self.ClassifyLocalPos( thisSDR, secondLast[ 0 ], secondLast[ 1 ], secondLast[ 2 ], secondLast[ 3 ], last[ 0 ], last[ 1 ] )
-        thisSDR = self.EncodeSenseData( last[ 0 ], last[ 1 ], last[ 2 ], last[ 3 ], last[ 0 ], last[ 1 ], True )
-        self.ClassifyLocalPos( thisSDR, last[ 0 ], last[ 1 ], last[ 2 ], last[ 3 ], last[ 0 ], last[ 1 ] )
-        thisSDR = self.EncodeSenseData( present[ 0 ], present[ 1 ], present[ 2 ], present[ 3 ], last[ 0 ], last[ 1 ], True )
-        self.ClassifyLocalPos( thisSDR, present[ 0 ], present[ 1 ], present[ 2 ], present[ 3 ], last[ 0 ], last[ 1 ] )
 
-    def LearnTimeStepPaddle ( self, last, present, centerX, centerY, chosenMotor ):
-    # Learn motion of paddle in tune with chosen motor function.
+        lastElement   = self.memBuffer[ -3 ]
+        centerElement = self.memBuffer[ -2 ]
+        nextElement   = self.memBuffer[ -1 ]
 
-        self.tp.reset()
-        thisSDR = self.EncodeSenseData( last[ 0 ], last[ 1 ], last[ 2 ], last[ 3 ], centerX, centerY, True )
-        self.ClassifyLocalPos( thisSDR, last[ 0 ], last[ 1 ], last[ 2 ], last[ 3 ], centerX, centerY )
-        self.ClassifyMotor( thisSDR, centerX, chosenMotor )
-        thisSDR = self.EncodeSenseData( present[ 0 ], present[ 1 ], present[ 2 ], present[ 3 ], centerX, centerY, True )
-        self.ClassifyLocalPos( thisSDR, present[ 0 ], present[ 1 ], present[ 2 ], present[ 3 ], centerX, centerY )
-        self.ClassifyMotor( thisSDR, centerX, chosenMotor )
+        self.EncodeSenseData( lastElement[ 0 ], lastElement[ 1 ], lastElement[ 2 ], lastElement[ 3 ], centerElement[ 0 ], centerElement[ 1 ], True )
+        winnerCellsTP = self.tp.getWinnerCells()
+        self.ClassifyLocalPos( winnerCellsTP, lastElement[ 0 ], lastElement[ 1 ], lastElement[ 2 ], lastElement[ 3 ], centerElement[ 0 ], centerElement[ 1 ] )
 
-    def OLDOLDInferLocalPos( self, thisSDR ):
-    # P( A|B ) = Probability that we are in this local pos state given that this cell is firing.
-    #               We compute using Baysian analysis.
-    # P( B|A ) = Probability that this cell is firing given that we are in this local pos state.
-    #               We compute by storing the cell firings for each local pos state.
-    # P( B )   = Probability that this cell is firing.
-    #               We compute this by assuming all cells have equal likelihood (given boosting).
-    # P( A )   = Probability that we are in this local pos state.
-    #               We compute by assuming it's 1 / found pos. It's the same for all so shouldn't matter.
-    #   http://cs.wellesley.edu/~anderson/writing/naive-bayes.pdf
+        self.EncodeSenseData( centerElement[ 0 ], centerElement[ 1 ], centerElement[ 2 ], centerElement[ 3 ], centerElement[ 0 ], centerElement[ 1 ], True )
+        winnerCellsTP = self.tp.getWinnerCells()
+        self.ClassifyLocalPos( winnerCellsTP, centerElement[ 0 ], centerElement[ 1 ], centerElement[ 2 ], centerElement[ 3 ], centerElement[ 0 ], centerElement[ 1 ] )
 
-        allCellsAllLocalProd = []
-        allLocalSum          = []
-        allLocalTotalSum     = 0.0
-        allCellAllLocalSum   = [ 0.0 ] * self.sp.getColumnDimensions()[ 0 ]
-        for localPos in self.ballCellForLocalPos:
-            allLocalSum.append( localPos[ 3 ] )
-            allLocalTotalSum += localPos[ 3 ]
-            allCellsThisLocalProd = 1.0
-            for cell in thisSDR.sparse:
-                # Compute P( B|A ) for this cell (B) and this localPos (A).
-                allCellsThisLocalProd *= localPos[ 2 ][ cell ] / localPos[ 3 ]
-                allCellAllLocalSum[ cell ] += localPos[ 2 ][ cell ]
-            allCellsAllLocalProd.append( allCellsThisLocalProd )
+        self.EncodeSenseData( nextElement[ 0 ], nextElement[ 1 ], nextElement[ 2 ], nextElement[ 3 ], centerElement[ 0 ], centerElement[ 1 ], True )
+        winnerCellsTP = self.tp.getWinnerCells()
+        self.ClassifyLocalPos( winnerCellsTP, nextElement[ 0 ], nextElement[ 1 ], nextElement[ 2 ], nextElement[ 3 ], centerElement[ 0 ], centerElement[ 1 ] )
 
-        allCellsNotAllLocalProd = []
-        for idx, localPos in enumerate( self.ballCellForLocalPos ):
-            allCellsNotThisLocalProd = 1.0
-            for cell in thisSDR.sparse:
-                if allLocalTotalSum - allLocalSum[ idx ] != 0.0:
-                    allCellsNotThisLocalProd *= ( allCellAllLocalSum[ cell ] - localPos[ 2 ][ cell ] ) / ( allLocalTotalSum - allLocalSum[ idx ] )
-            allCellsNotAllLocalProd.append( allCellsNotThisLocalProd )
+#    def LearnTimeStepPaddle ( self, last, present, centerX, centerY, chosenMotor ):
+#    # Learn motion of paddle in tune with chosen motor function.
+#
+#        self.tp.reset()
+#
+#        thisSDR = self.EncodeSenseData( last[ 0 ], last[ 1 ], last[ 2 ], last[ 3 ], centerX, centerY, True )
+#        self.ClassifyLocalPos( thisSDR, last[ 0 ], last[ 1 ], last[ 2 ], last[ 3 ], centerX, centerY )
+#        self.ClassifyMotor( thisSDR, centerX, chosenMotor )
+#        thisSDR = self.EncodeSenseData( present[ 0 ], present[ 1 ], present[ 2 ], present[ 3 ], centerX, centerY, True )
+#        self.ClassifyLocalPos( thisSDR, present[ 0 ], present[ 1 ], present[ 2 ], present[ 3 ], centerX, centerY )
+#        self.ClassifyMotor( thisSDR, centerX, chosenMotor )
+
+    def InferLocalPos ( self, thisSDR, localPosList ):
+    # Makes an inference on classification of thisSDR using overlap scores.
 
         probabilities = []
 
-        for lp in range( len( self.ballCellForLocalPos ) ):
-            if ( allLocalSum[ lp ] * allCellsAllLocalProd[ lp ] ) + ( allLocalTotalSum - allLocalSum[ lp ] ) * allCellsNotAllLocalProd[ lp ] != 0.0:
-                probAB = allLocalSum[ lp ] * allCellsAllLocalProd[ lp ] / ( ( allLocalSum[ lp ] * allCellsAllLocalProd[ lp ] ) + ( allLocalTotalSum - allLocalSum[ lp ] ) * allCellsNotAllLocalProd[ lp ] )
-            else:
-                probAB = 0.0
-                print("Numerator was zero.")
+        sizeSDR = thisSDR.sparse.size
 
-            probabilities.append( [ self.ballCellForLocalPos[ lp ][ 0 ], self.ballCellForLocalPos[ lp ][ 1 ], probAB ] )
+        if sizeSDR > 0:
+            for localPos in localPosList:
+                overlapScore = self.Overlap( thisSDR.sparse, localPos[ 0 ] )
+                probabilities.append( [ overlapScore, overlapScore / sizeSDR, [ localPos[ i ] for i in range( 1, len( localPos ) ) ] ] )
 
-        return probabilities
-
-    def OLDInferLocalPos( self, thisSDR ):
-    # P( A|B ) = Probability that we are in this local pos state given that this cell is firing.
-    #               We compute using Baysian analysis.
-    # P( B|A ) = Probability that this cell is firing given that we are in this local pos state.
-    #               We compute by storing the cell firings for each local pos state.
-    # P( B )   = Probability that this cell is firing.
-    #               We compute this by assuming all cells have equal likelihood (given boosting).
-    # P( A )   = Probability that we are in this local pos state.
-    #               We compute by assuming it's 1 / found pos. It's the same for all so shouldn't matter.
-    #   http://cs.wellesley.edu/~anderson/writing/naive-bayes.pdf
-
-        probStateGivenSDR        = []
-        sumForEachState          = []
-        totalSumForAllStates     = 0.0
-        sumForCellForAllStates   = [ 0.0 ] * self.sp.getColumnDimensions()[ 0 ]
-        for localPos in self.ballCellForLocalPos:
-            sumForEachState.append( localPos[ 3 ] )
-            totalSumForAllStates += localPos[ 3 ]
-            probStateGivenCells = 0.0
-            for cell in thisSDR.sparse:
-                # Compute P( B|A ) for this cell (B) and this localPos (A).
-                probStateGivenCells += localPos[ 2 ][ cell ] / localPos[ 3 ]
-                sumForCellForAllStates[ cell ] += localPos[ 2 ][ cell ]
-            probStateGivenSDR.append( probStateGivenCells )
-
-        probNotStateGivenSDR = []
-        for idx, localPos in enumerate( self.ballCellForLocalPos ):
-            probNotStateGivenCells = 0.0
-            for cell in thisSDR.sparse:
-                if totalSumForAllStates - sumForEachState[ idx ] != 0.0:
-                    probNotStateGivenCells += ( sumForCellForAllStates[ cell ] - localPos[ 2 ][ cell ] ) / ( totalSumForAllStates - sumForEachState[ idx ] )
-            probNotStateGivenSDR.append( probNotStateGivenCells )
-
-        probabilities = []
-
-        for lp in range( len( self.ballCellForLocalPos ) ):
-            if ( ( sumForEachState[ lp ] * probStateGivenSDR[ lp ] ) + ( totalSumForAllStates - sumForEachState[ lp ] ) * probNotStateGivenSDR[ lp ] ) != 0.0:
-                probAB = sumForEachState[ lp ] * probStateGivenSDR[ lp ] / ( ( sumForEachState[ lp ] * probStateGivenSDR[ lp ] ) + ( totalSumForAllStates - sumForEachState[ lp ] ) * probNotStateGivenSDR[ lp ] )
-            else:
-                probAB = 0.0
-                print("Numerator was zero.")
-            probabilities.append( [ self.ballCellForLocalPos[ lp ][ 0 ], self.ballCellForLocalPos[ lp ][ 1 ], probAB ] )
-
-        print(probabilities)
+            probabilities.sort( key = lambda x: x[ 1 ], reverse = True )
 
         return probabilities
 
-    def InferLocalPos ( self, thisSDR ):
-
-        probabilities = []
-
-        for localPos in self.ballCellForLocalPos:
-            probabilities.append( [ localPos[ 0 ], localPos[ 1 ], self.Overlap( thisSDR, localPos[ 2 ] ) ] )
-
-        probabilities.sort( key = lambda x: x[ 2 ], reverse = True )
-        print("Predicted Cells:", thisSDR)
-        print("Probabilities:", probabilities )
-        return probabilities
-
-    def PredictTimeStep ( self, secondLast, last, predStep ):
+    def PredictSequenceBall ( self ):
     # Train time-step data, from secondlast to last, centered around last, and then predict next position and return.
 
-        self.tp.reset()
+#        print("---------------------------------------------")
 
-        secondLastSDR = self.EncodeSenseData( secondLast[ 0 ], secondLast[ 1 ], secondLast[ 2 ], secondLast[ 3 ], last[ 0 ], last[ 1 ], False )
+        paths = []
+        paths.append( [ self.memBuffer[ -2 ], self.memBuffer[ -1 ] ] )
+        toAppend = []
 
-        lastSDR = self.EncodeSenseData( last[ 0 ], last[ 1 ], last[ 2 ], last[ 3 ], last[ 0 ], last[ 1 ], False )
-        predictCellsTP = self.tp.getPredictiveCells()
+        while len( paths ) > 0 and len( toAppend ) <= self.maxStepsInPath:
+            lastElement   = paths[ -1 ][ 0 ]
+            centerElement = paths[ -1 ][ 1 ]
+            paths.pop( -1 )
+#            print( "TEST:", lastElement, centerElement)
 
-        # Get predicted location for next time step.
-        stepSenseSDR = SDR( self.sp.getColumnDimensions() )
-        stepSenseSDR.sparse = numpy.unique( [ self.tp.columnForCell( cell ) for cell in predictCellsTP.sparse ] )
-        greatestPred = self.InferLocalPos( stepSenseSDR )[ 0 ]
-        if greatestPred[ 2 ] != 0.0:
-            positionX = greatestPred[ 0 ]
-            positionY = greatestPred[ 1 ]
-        else:
-            positionX = 0
-            positionY = 0
-#        positionX = numpy.argmax( self.ballLocalXClass.infer( pattern = stepSenseSDR ) ) - int( self.localDimX / 2 )
-#        positionY = numpy.argmax( self.ballLocalYClass.infer( pattern = stepSenseSDR ) ) - int( self.localDimY / 2 )
+            self.tp.reset()
 
-        print( "Prediction:", positionX, positionY )
-        print( "Pred Step:", predStep )
+#            print( "LAST:", lastElement, "CENTER:", centerElement)
 
-        return [ last[ 0 ] + positionX, last[ 1 ] + positionY, last[ 2 ], last[ 3 ] ]
+            self.EncodeSenseData( lastElement[ 0 ], lastElement[ 1 ], lastElement[ 2 ], lastElement[ 3 ], centerElement[ 0 ], centerElement[ 1 ], False )
+
+            self.EncodeSenseData( centerElement[ 0 ], centerElement[ 1 ], centerElement[ 2 ], centerElement[ 3 ], centerElement[ 0 ], centerElement[ 1 ], False )
+            predictCellsTP = self.tp.getPredictiveCells()
+
+#            print( "NUM PREDICTED CELLS:", len(predictCellsTP.sparse))
+
+            # Get predicted location for next time step.
+#            predictions = self.InferLocalPos( predictCellsTP, self.paddleAForLocalPos )
+#            print("Paddle A probabilities:", predictions )
+
+#            for pred in predictions:
+#                if pred[ 1 ] >= self.overlapThresh and pred[ 2 ][ 0 ] != None:
+#                    nextPaddleAPos = centerElement[ 1 ] + pred[ 2 ][ 0 ]
+#                    if nextPaddleAPos > self.screenHeight / 2:
+#                        nextPaddleAPos = int( self.screenHeight / 2 )
+#                    elif nextPaddleAPos < -self.screenHeight / 2:
+#                        nextPaddleAPos[ 0 ] = -int( self.screenHeight / 2 )
+#
+#                    paths.append( [ centerElement, [ nextBallPos[ 0 ], nextBallPos[ 1 ], None, None ] ] )
+#                    toAppend.append( [ nextBallPos[ 0 ], nextBallPos[ 1 ], None, None ] )
+
+            predictions = self.InferLocalPos( predictCellsTP, self.ballCellForLocalPos )
+            print("Ball probabilities:", predictions )
+
+            for pred in predictions:
+                if pred[ 1 ] >= self.overlapThresh and pred[ 2 ][ 0 ] != None and pred[ 2 ][ 1 ] != None:
+                    nextBallPos = [ centerElement[ 0 ] + pred[ 2 ][ 0 ], centerElement[ 1 ] + pred[ 2 ][ 1 ] ]
+                    if nextBallPos[ 0 ] > self.screenWidth / 2:
+                        nextBallPos[ 0 ] = int( self.screenWidth / 2 )
+                    elif nextBallPos[ 0 ] < -self.screenWidth / 2:
+                        nextBallPos[ 0 ] = -int( self.screenWidth / 2 )
+                    if nextBallPos[ 1 ] > self.screenHeight / 2:
+                        nextBallPos[ 1 ] = int( self.screenHeight / 2 )
+                    elif nextBallPos[ 1 ] < -self.screenHeight / 2:
+                        nextBallPos[ 1 ] = -int( self.screenHeight / 2 )
+
+                    paths.append( [ centerElement, [ nextBallPos[ 0 ], nextBallPos[ 1 ], None, None ] ] )
+                    toAppend.append( [ nextBallPos[ 0 ], nextBallPos[ 1 ], None, None ] )
+
+#                    if pred[ 4 ] != None:
+#                        nextPaddleAPos = centerElement[ 1 ] + pred[ 4 ]
+#                    else:
+#                        nextPaddleAPos = None
+
+#                    if pred[ 5 ] != None:
+#                        nextPaddleBPos = centerElement[ 1 ] + pred[ 5 ]
+#                    else:
+#                        nextPaddleBPos = None
+
+
+#                    if nextBallPos[ 0 ] == -350 and nextBallPos[ 1 ] == pred[ 4 ]:
+#                        print("Ball predicted to hit paddle.")
+
+#                    self.EncodeSenseData( nextPos[ 0 ], nextPos[ 1 ], centerElement[ 2 ], centerElement[ 3 ], centerElement[ 0 ], centerElement[ 1 ], False )
+
+        self.predPositions.extend( toAppend )
+#                print("APPEND:", [ centerElement, [ nextPos[ 0 ], nextPos[ 1 ], centerElement[ 2 ], centerElement[ 3 ] ] ])
+
+        while len( self.predPositions ) > self.maxPredLocations:
+            self.predPositions.pop( 0 )
 
     def Brain ( self, ballX, ballY, paddleAY, paddleBY ):
     # Agents brain center.
 
         # Set present ball coordinates for next time-step.
-        self.memBuffer.append( [ ballX, ballY, paddleAY, paddleBY, 1, 1 ] )
+        self.memBuffer.append( [ ballX, ballY, paddleAY, paddleBY ] )
         while len( self.memBuffer ) > self.maxMemoryDist:
             self.memBuffer.pop( 0 )
 
         # Learn 3-step sequence, and jump, centered around ball. Do this back in memory.
-        self.LearnTimeStepBall( self.memBuffer[ -3 ], self.memBuffer[ -2 ], self.memBuffer[ -1 ] )
+        self.LearnTimeStepBall()
+        print( "Size of learned positions:", len(self.ballCellForLocalPos))
 
-        # Store last and present locations.
-        self.predPositions.clear()
-        self.predPositions.append( self.memBuffer[ -2 ] )
-        self.predPositions.append( self.memBuffer[ -1 ] )
+        # Predict next ball positions and store them.
+        self.PredictSequenceBall()
+#        print( "Pred Positions:", self.predPositions)
 
+        # If ball is predicted to fall off then try to move paddle there.
         paddleADirect = False
         paddleBDirect = False
         chosenMotorA = 1
         chosenMotorB = 1
+        for pred in self.predPositions:
+            if pred[ 0 ] <= -300:
+                paddleADirect = True
+                if paddleAY > pred[ 1 ]:
+                    chosenMotorA = 2
+#                    self.memBuffer[ -1 ][ 4 ] = chosenMotorA
+                elif paddleAY < pred[ 1 ]:
+                    chosenMotorA = 0
+#                    self.memBuffer[ -1 ][ 4 ] = chosenMotorA
+            elif pred[ 0 ] >= 300:
+                paddleBDirect = True
+                if paddleBY > pred[ 1 ]:
+                    chosenMotorB = 2
+#                    self.memBuffer[ -1 ][ 5 ] = chosenMotorB
+                elif paddleBY < pred[ 1 ]:
+                    chosenMotorB = 0
+#                    self.memBuffer[ -1 ][ 5 ] = chosenMotorB
 
-        # Predict next 10 time step locations and store them.
-        for step in range( self.maxPredLocations - 2):
-            nextPosition = self.PredictTimeStep( self.predPositions[ -2 ], self.predPositions[ -1 ], step )
-            if Within( nextPosition[ 0 ], -self.screenWidth / 2, self.screenWidth / 2, True ):
-                if Within( nextPosition[ 1 ], -self.screenHeight / 2, self.screenHeight / 2, True ):
-                    self.predPositions.append( nextPosition )
-
-                    # If ball is predicted to fall off then try to move paddle there.
-                    if nextPosition[ 0 ] <= -330:
-                        paddleADirect = True
-                        if paddleAY > nextPosition[ 1 ]:
-                            chosenMotorA = 2
-                            self.memBuffer[ -1 ][ 4 ] = chosenMotorA
-                        elif paddleAY < nextPosition[ 1 ]:
-                            chosenMotorA = 0
-                            self.memBuffer[ -1 ][ 4 ] = chosenMotorA
-                        break
-                    elif nextPosition[ 0 ] >= 330:
-                        paddleBDirect = True
-                        if paddleBY > nextPosition[ 1 ]:
-                            chosenMotorB = 2
-                            self.memBuffer[ -1 ][ 5 ] = chosenMotorB
-                        elif paddleBY < nextPosition[ 1 ]:
-                            chosenMotorB = 0
-                            self.memBuffer[ -1 ][ 5 ] = chosenMotorB
-                        break
-                else:
-                    break
-            else:
-                break
-
-        # If we aren't directing paddles movement then just learn paddle movement with random motion.
-        if not paddleADirect:
-            chosenMotorA = random.choice( [ 0, 1, 2 ] )
-            self.memBuffer[ -1 ][ 4 ] = chosenMotorA
-        if not paddleBDirect:
-            chosenMotorB = random.choice( [ 0, 1, 2 ] )
-            self.memBuffer[ -1 ][ 5 ] = chosenMotorB
+#        # If we aren't directing paddles movement then just learn paddle movement with random motion.
+#        if not paddleADirect:
+#            chosenMotorA = random.choice( [ 0, 1, 2 ] )
+#            self.memBuffer[ -1 ][ 4 ] = chosenMotorA
+#        if not paddleBDirect:
+#            chosenMotorB = random.choice( [ 0, 1, 2 ] )
+#            self.memBuffer[ -1 ][ 5 ] = chosenMotorB
 
         # Learn last 2-step sequence centered around paddle_a.
 #        self.LearnTimeStepPaddle( self.memBuffer[ -2 ], self.memBuffer[ -1 ], -350, self.memBuffer[ -2 ][ 2 ], self.memBuffer[ -2 ][ 4 ] )

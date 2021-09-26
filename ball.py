@@ -127,13 +127,13 @@ while True:
         # Ball hits paddle A
         ball.dx *= -1
         ball.goto( -340, ball.ycor() )
-#        paddleAMove = False
+        paddleAMove = False
 
     elif ball.xcor() > 340 and ball.ycor() < paddle_b.ycor() + 50 and ball.ycor() > paddle_b.ycor() - 50:
         # Ball hits paddle B
         ball.dx *= -1
         ball.goto( 340, ball.ycor() )
-#        paddleBMove = False
+        paddleBMove = False
 
     # Run each agents learning algorithm and produce predictions.
     paddleMove = ballAgent.Brain( ball.xcor(), ball.ycor(), paddle_a.ycor(), paddle_b.ycor() )
@@ -157,10 +157,15 @@ while True:
             paddle_b.sety( -screenHeight / 2 )
 
     # Draw predictions for ball agent.
-    for i in range( len( ballAgent.predPositions ) ):
-        if Within( ballAgent.predPositions[ i ][ 0 ], -screenWidth / 2, screenWidth / 2, True ) and Within( ballAgent.predPositions[ i ][ 1 ], -screenHeight / 2, screenHeight / 2, True ):
-            placeCellsDraw[ i ].setx( ballAgent.predPositions[ i ][ 0 ] )
-            placeCellsDraw[ i ].sety( ballAgent.predPositions[ i ][ 1 ] )
+    for pred in range( ballAgent.maxPredLocations ):
+        if pred < len( ballAgent.predPositions ):
+            draw = ballAgent.predPositions[ pred ]
+            if Within( draw[ 0 ], -screenWidth / 2, screenWidth / 2, True ) and Within( draw[ 1 ], -screenHeight / 2, screenHeight / 2, True ):
+                placeCellsDraw[ pred ].setx( draw[ 0 ] )
+                placeCellsDraw[ pred ].sety( draw[ 1 ] )
+            else:
+                placeCellsDraw[ pred ].setx( 0 )
+                placeCellsDraw[ pred ].sety( 0 )
         else:
-            placeCellsDraw[ i ].setx( 0 )
-            placeCellsDraw[ i ].sety( 0 )
+            placeCellsDraw[ pred ].setx( 0 )
+            placeCellsDraw[ pred ].sety( 0 )
