@@ -36,12 +36,12 @@ def Overlap ( SDR1, SDR2 ):
 
 class AgentOrange:
 
-    resolutionX = 10
-    resolutionY = 10
-
-    def __init__( self, name ):
+    def __init__( self, name, resX, resY ):
 
         self.ID = name
+
+        self.resolutionX = resX
+        self.resolutionY = resY
 
         # Set up encoder parameters
         colourEncodeParams    = ScalarEncoderParameters()
@@ -92,10 +92,15 @@ class AgentOrange:
 #            potentialPct              = 10,         # INCREASE THIS LATER, SMALL FOR TESTING SPEED
         )
 
+        self.lastX = 0
+        self.lastY = 0
+
 #        self.whatColour = Classifier( alpha = 1 )
 
     def PrintBitRep( self, whatPrintRep ):
     # Prints out the bit represention.
+
+        print ( "\n" )
 
         for y in range( self.resolutionY ):
             for x in range( self.resolutionX ):
@@ -127,23 +132,23 @@ class AgentOrange:
             for y in range( self.resolutionY ):
                 posX = x - ( self.resolutionX / 2 ) + centerX
                 posY = y - ( self.resolutionY / 2 ) + centerY
-                if Within( posX, objX - (objW * 10 ), objX + ( objW * 10 ), True ) and Within( posY, objY - (objH * 10 ), objY + ( objH * 10 ), True ):
+                if Within( posX, objX - objW, objX + objW, True ) and Within( posY, objY - objH, objY + objH, True ):
                     localBitRep.append( x + ( y * self.resolutionX ) + (objC * self.resolutionX * self.resolutionY ) )
                 else:
                     localBitRep.append( x + ( y * self.resolutionX ) )
 
-#        self.PrintBitRep( localBitRep )
+        self.PrintBitRep( localBitRep )
 
         bitRepSDR = SDR( maxArraySize )
         bitRepSDR.sparse = numpy.unique( localBitRep )
         return bitRepSDR
 
-    def EncodeSenseData ( self, objX, objY, objW, objH, objC ):
+    def EncodeSenseData ( self, sensePosX, sensePosY, objX, objY, objW, objH, objC ):
     # Get sensory information and encode it as an SDR in the sense network.
 
         # Encode colour
 #        colourBits = self.colourEncoder.encode( colour )
-        objBits = self.BuildLocalBitRep( 0, 0, objX, objY, objW, objH, objC )
+        objBits = self.BuildLocalBitRep( sensePosX, sensePosY, objX, objY, objW, objH, objC )
 
         # Concatenate all these encodings into one large encoding for Spatial Pooling.
 #        encoding = SDR( self.encodingWidth ).concatenate( [ colourBits ] )
@@ -155,12 +160,14 @@ class AgentOrange:
 #        self.whatColour.learn( pattern = senseSDR, classification = colour )
         return senseSDR
 
-    def Brain ( self, objX, objY, objW, objH, objC ):
+    def Brain ( self, objX, objY, objW, objH, objC, sensePosX, sensePosY ):
 
         # Encode the input column SDR for current position.
-        senseSDR = self.EncodeSenseData( objX, objY, objW, objH, objC )
-
-        print(objC, senseSDR)
+        senseSDR = self.EncodeSenseData( sensePosX, sensePosY, objX, objY, objW, objH, objC )
 
         # Compute cell activation and generate next predicted cells.
-#        self.vp.Compute( senseSDR )
+        self.vp.Compute( senseSDR, sensePosX - self.lastX, sensePosY - self.lastY )
+
+        # Update the last positions to be used for vector or change in position.
+        self.lastX = sensePosX
+        self.lastY = sensePosY

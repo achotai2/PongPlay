@@ -1,112 +1,17 @@
-from random import randrange, sample
+from random import sample
 from bisect import bisect_left
+from cell_and_synapse import FCell, OCell
 import numpy as np
+from time import time
 
 def BinarySearch( list, val ):
-# Search a sorted list.
+# Search a sorted list: return False if val not in list, and True if it is.
 
     i = bisect_left( list, val )
     if i != len( list ) and list[ i ] == val:
         return True
     else:
         return False
-
-class Synapse:
-
-    def __init__( self, FCell, OCell, initialPermanance, posDimensions, posX, posY, posRange ):
-    # Create a new synapse from Object OCell to Feature FCell.
-
-        self.OCell  = OCell
-        self.FCell  = FCell
-        self.permanance    = initialPermanance
-        self.posDimensions = posDimensions      # Number of dimensions vector positions will be in.
-        self.positions     = []                 # A list of tuples, one for each dimension, with a range for location.
-        for i in range( self.posDimensions ):
-            posI = ( posX - posRange / 2, posX + posRange / 2 )
-            self.positions.append( posI )
-
-    def Inside( self, posX, posY ):
-    # Checks if given position is inside range.
-
-        if posX >= self.positions[ 0 ][ 0 ] and posX <= self.positions[ 0 ][ 1 ]:
-            if posY >= self.positions[ 1 ][ 0 ] and posY <= self.positions[ 1 ][ 1 ]:
-                return True
-            else:
-                return False
-        else:
-            return False
-
-class FCell:
-
-    def __init__( self, ID ):
-    # Create a new inactive feature level cell with no synapses.
-
-        self.ID             = ID
-        self.active         = False           # Means column burst, or cell was predictive and then column fired.
-        self.predictive     = False           # Means synapses on connected segments above activationThreshold.
-        self.numSegments    = 0               # Number of OCell segments that are attached to this FCell.
-
-class OCell:
-
-    def __init__( self, ID ):
-    # Create a new inactive feature level cell with no synapses.
-
-        self.ID             = ID
-        self.active         = False
-        self.segments       = []              # Contains lists of synapses. Each segment attaches to a unique feature.
-        self.activeSegments = []              # A list of indexes to segments that predicted FCells that then fired.
-
-    def __lt__( self, other ):
-    # Use for < comparison of cells. Used in sort algorithm.
-
-         return len( self.segments ) < len( other.segments )
-
-    def CreateSegment( self, FCellList, initialPermanence, posX, posY, posRange ):
-    # Create a new segment with synapses connecting this OCell to all FCells in list, centered around position given.
-    # Make that segment active.
-
-        newSegment = []
-        for FCell in FCellList:
-            newSynapse = Synapse( FCell, self.ID, initialPermanence, 2, posX, posY, posRange )
-            newSegment.append( newSynapse )
-
-        self.segments.append( newSegment )
-
-        self.activeSegments.append( len( self.segments ) - 1 )
-
-    def SegmentActivation( self, activationThreshold, activeFCells, posX, posY ):
-    # Check for any segments with synapses connecting to currently active Fcells. Activate any segments with
-    # synapses above threshold, that also agree with vector location range (which is stored in the synapses).
-
-        if len( self.segments ) > 0:
-            for indx, segment in enumerate( self.segments ):
-                segScore = 0
-                for synapse in segment:
-                    if BinarySearch( activeFCells, synapse.FCell ) and synapse.Inside( posX, posY ):
-                        segScore += 1
-
-#                    print(activeFCells)
-#                    print(synapse.FCell)
-                    if (BinarySearch( activeFCells, synapse.FCell )):
-                        print ("It's True!")
-
-                if segScore >= activationThreshold:
-                    self.activeSegments.append( indx )
-                    print(indx)
-
-    def SegmentLearning( self, activeFCells ):
-    # 2.) Increase permanance of synapses in active segments that connect to active cells, and decrease permanance
-    #   of those synapses in active segments that don't. Also decrease slightly the permanance of inactive segments.
-    # 3.) If no segments are sufficient to become active (meaning object specific unexpected input), and no other
-    #   active OCells were predicting these FCells (meaning it is globally unexpected), then create a new segment
-    #   with connections between this OCell and all these FCells, and the current vector position, and make it active.
-
-        if len( self.segments ) > 0:
-            noneSufficient = False
-            for seg in self.segments:
-                print("yo")
-
-        return False            # Returns False if there are no active segments, so create a new segment.
 
 class VectorMemory:
 
@@ -151,49 +56,102 @@ class VectorMemory:
         self.FCells = []
         for i in range( columnDimensions * cellsPerColumn ):
             self.FCells.append( FCell( i ) )
-        self.activeFCells = []
+        self.activeFCells     = []
+        self.lastActiveFCells = []
+        self.predictiveFCells = []
+        self.primedFCells     = []
 
         # Create cells in object layer.
         self.OCells = []
         for o in range( numObjectCells ):
             self.OCells.append( OCell( o ) )
-
             # Create a random set of active object cells to start.
         self.activeOCells = sorted( sample( range( numObjectCells ), OCellActivation ) )
 
-        self.burstingCols = []
+    def SelectWinnerCell( self, burstingColumn ):
+    # Selects one winner cell from the bursting column, choosing the one with the least segments.
 
-    def SelectWinnerCells( self, burstingColumns ):
-    # Selects one winner cell from each active columns, choosing the one with the least segments attached.
+        minSegs    = -1
+        minSegIndx = 0
+
+        for cell in range( burstingColumn * self.FCellsPerColumn, ( burstingColumn * self.FCellsPerColumn ) + self.FCellsPerColumn ):
+            if minSegs == -1 or len( self.FCells[ cell ].segments ) < minSegs:
+                minSegs    = len( self.FCells[ cell ].segments )
+                minSegIndx = cell
+
+        return minSegIndx
+
+    def NewFeature( self, burstingCols, vector ):
+    # Create a new feature.
 
         winnerCells = []
 
-        for col in burstingColumns:
-            segsPerCell = []
+        for col in burstingCols:
+            # Select winner cells from all bursting columns.
+            winnerCells.append( self.SelectWinnerCell( col ) )
 
-            for cell in range( col * self.FCellsPerColumn, ( col * self.FCellsPerColumn ) + self.FCellsPerColumn ):
-                numSegments = 0
-                for Ocell in self.OCells:
-                    for segment in Ocell.segments:
-                        for synapse in segment:
-                            if synapse.FCell == cell:
-                                numSegments += 1
-                                break
-                segsPerCell.append( [ cell, numSegments ] )
-            segsPerCell.sort( key = lambda segsPerCell: segsPerCell[ 1 ] )
-            winnerCells.append( segsPerCell[ 0 ][ 0 ] )
+        # Create synapses from all past primed FCells to these winnerCells.
+        if len( self.lastActiveFCells ) > 0:
+            lastCell = self.lastActiveFCells[ 0 ]
+            # Go through all the cells of all the segments in every lastActiveFCell
+            if len( self.FCells[ lastCell ].segments ) > 0:
+                for segment in self.FCells[ lastCell ].segments:
 
-        return winnerCells
+                    # Calculate vectors that go from this other cell, through the lastActive cell, to the winnerCell, and vise-versa.
+                    oldToNewVector = [ 0 ] * len( vector )
+                    newToOldVector = [ 0 ] * len( vector )
+                    for i in range( len( vector ) ):
+                        oldToNewVector[ i ] = vector[ i ] - segment.vector[ i ][ 0 ]
+                        newToOldVector[ i ] = segment.vector[ i ][ 0 ] - vector[ i ]
+
+                    # Create a new segment from every cell on every segment of lastActiveFCells' cells.
+                    for endCell in segment.synapses:
+                        self.FCells[ endCell ].CreateSegment( winnerCells, self.initialPermanence, oldToNewVector, self.initialPosVariance )
+
+                    # Create a segment from this winnerCell to this lastActive segment cells.
+                    for winCell in winnerCells:
+                        self.FCells[ winCell ].CreateSegment( segment.synapses, self.initialPermanence, newToOldVector, self.initialPosVariance )
+
+            # Create for last active cells a new segment to these winner cells.
+            # Create winner cells from lastActive in case some columns bursting.
+            cellsToSynapse = []
+            for lastCell2 in self.lastActiveFCells:
+                if self.FCells[ lastCell2 ].predictive:
+                    cellsToSynapse.append( lastCell2 )
+                elif not self.FCells[ lastCell2 ].predictive and lastCell2 % self.FCellsPerColumn == 0:
+                    cellsToSynapse.append( self.SelectWinnerCell( int( lastCell2 / self.FCellsPerColumn ) ) )
+            for thisCell in cellsToSynapse:
+                self.FCells[ thisCell ].CreateSegment( winnerCells, self.initialPermanence, vector, self.initialPosVariance )
+
+            # Create for winnerCells a new segment to lastActive cells.
+            newVector = [ 0 ] * len( vector )
+            for i in range( len( vector) ):
+                newVector[ i ] = -vector[ i ]
+            for winCell in winnerCells:
+                if len( cellsToSynapse ) > 0:
+                    self.FCells[ winCell ].CreateSegment( cellsToSynapse, self.initialPermanence, newVector, self.initialPosVariance )
+
+#        # Add winner cell to object rep by creating synapses for all active OCells, and prime it.
+#        for oCell in self.activeOCells:
+#            self.OCells[ oCell ].NewSynapse( winnerCell, self.initialPermanence )
+#        self.FCells[ winnerCell ].primed = True
+
+#        toPrint = []
+#        for cell in self.FCells:
+#            toPrint.append( len( cell.segments ) )
+#        print( toPrint )
 
     def ActivateFCells( self, columnSDR ):
     # Uses activated columns and cells in predictive state to put cells in active states.
 
-        # De-activate old active cells and bursting columns in feature level.
-        self.burstingCols = []
-        for cell in self.activeFCells:
-            self.FCells[ cell ].active = False
+        # Clean up old active cells and store old ones in lastActiveFCells.
+        for aCell in self.activeFCells:
+            self.FCells[ aCell ].active = False
+        self.lastActiveFCells = self.activeFCells
+        self.activeFCells = []
 
-        activeCells = []
+        activeCells  = []
+        burstingCols = []
 
         for col in columnSDR.sparse:
             columnPredictive = False
@@ -205,86 +163,69 @@ class VectorMemory:
                     self.FCells[ cell ].active = True
                     activeCells.append( cell )
 
-            # If none predictive then burst column.
+            # If none predictive then burst column, making all cells in column active.
             if not columnPredictive:
-                self.burstingCols.append( col )
+                burstingCols.append( col )
                 for cell in range( col * self.FCellsPerColumn, ( col * self.FCellsPerColumn ) + self.FCellsPerColumn ):
                     self.FCells[ cell ].active = True
                     activeCells.append( cell )
 
-        print( "Bursting Pct: ", len( self.burstingCols ) / self.columnDimensions * 100, "%" )
+        print( "Bursting Pct: ", len( burstingCols ) / self.columnDimensions * 100, "%" )
 
         # Add the active cells to the list of active cells.
         self.activeFCells = sorted( activeCells )
 
-#    def PredictCells( self, oldActive, newActive ):
-    # Generate new predicted cells.
+        return burstingCols
 
-#    def ClearPrediction( self ):
-    # Clear and refresh the predicted cells.
+    def PredictFCells( self, vector ):
+    # Clear old predicted FCells and generate new predicted FCells.
 
-    def SynapseLearning( self, columnSDR ):
-    # Perform learning on synpases by:
+        # Clean up old predictive cells.
+        for pCell in self.predictiveFCells:
+            self.FCells[ pCell ].predictive = False
+        self.predictiveFCells = []
 
-        for FCol in columnSDR.sparse:
-            # 1.) Check if column is bursting.
-            if FCol in self.burstingCols:
-                # a.) If it is then we are seeing something unexpected. Choose a winner Fcell with least segments
-                #       from the column. Build a segment from this Fcell to all active Ocells and activate segment.
-                #       Also
-                if len( self.activeOCells ) > self.OCellActivation:
-                    for i in range( self.FCellsPerColumn ):
-                        print("1a")
+        predictFCells = []
+        score         = [ 0 ] * self.columnDimensions * self.FCellsPerColumn
 
-                # b.) If there aren't enough Ocells active above threshold then we are just starting observation.
-                else:
-                    solidSegs = False
-                    leastSeg    = 0
-                    leastSegNum = 0
-                    for FCell in range( FCol * self.FCellsPerColumn, ( FCol * self.FCellsPerColumn ) + self.FCellsPerColumn ):
-                        # i.) Check if any Fcells in column have segments to Ocells, meaning we've already learned this object.
-                        if len( self.FCells[ FCell ].segments ) > 0:
-                            #   If yes then activate these segments.
-                            solidSegs = True
-                            print( "1bi" )
+        for lastActive in self.activeFCells:
+            for segment in self.FCells[ lastActive ].segments:
+                if segment.Inside( vector ):
+                    for pCell in segment.synapses:
+                        score[ pCell ] += 1
 
-                        elif len( self.FCells[ FCell ].segments ) <= leastSegNum:
-                            leastSeg    = FCell
-                            leastSegNum = len( self.FCells[ FCell ].segments )
+        for indx, cell in enumerate( self.FCells ):
+            if score[ indx ] >= self.activationThreshold:
+                cell.predictive = True
+                predictFCells.append( indx )
 
-                    if not solidSegs:
-                    # ii.) If none this means we haven't learned this feature. Choose Fcell with least segments as winner.
-                    # Build a new segment from this cell to a set of random Ocells with least segments, and build segments
-                    #  from Ocells back to Fcell. We're learning a new object represention.
-                        OCellsLeastSegs = self.OCells.copy()
-                        OCellsLeastSegs.sort()
-                        while len( OCellsLeastSegs ) > self.OCellActivation:
-                            OCellsLeastSegs.pop( -1 )
-                        self.FCells[ leastSeg ].CreateSegment( OCellsLeastSegs )
+        self.predictiveFCells = sorted( predictFCells )
 
-        # 2.) If column is not bursting:
-        #   a.) For all active Fcells in column, these were predicted by the object level. Activate their segments
-        #       connecting back to currently active Ocells.
+    def PrimeFCells( self ):
+    # Go through active OCells and prime all FCells.
 
-    def Compute( self, columnSDR ):
-    # Generate active cells, clear last predicted cells, generate next predictive cells.
+        # First reset old primed FCells.
+        for prCell in self.primedFCells:
+            self.FCells[ prCell ].primed = False
+        self.primedFCells = []
+
+        for oCell in self.activeOCells:
+            for syn in self.OCells[ oCell ].synapses:
+                self.FCells[ syn.FCell ].primed = True
+                self.primedFCells.append( syn.FCell )
+
+    def Compute( self, columnSDR, vectorX, vectorY ):
+    # Compute the action of vector memory, and learn on the synapses.
+
+        if len( self.activeFCells ) > 0:
+            self.PredictFCells( [vectorX, vectorY ] )
 
         # Clear old active cells and get new ones active cells for this time step.
-        self.ActivateFCells( columnSDR )
+        burstingCols = self.ActivateFCells( columnSDR )
 
-        # For all active OCells:
-        for actOCell in self.activeOCells:
-            # Activate their segments.
-            self.OCells[ actOCell ].SegmentActivation( self.activationThreshold, self.activeFCells, 0, 0 )
-            # Perform learning on these active segments.
-            if not self.OCells[ actOCell ].SegmentLearning( self.activeFCells ):
-                # Or, create a new segment if none are active. Select winner cells from bursting columns.
-                winnerCells = self.SelectWinnerCells( self.burstingCols )
-                self.OCells[ actOCell ].CreateSegment( winnerCells, self.initialPermanence, 0, 0, self.initialPosVariance )
-                print ("created segment")
-        # Perform learning on pre-existing synapses.
-#        if len( self.activeFCellBuffer ) > 1:
-#            self.SynapseLearning( columnSDR )
+#        print( "Predicted: ", self.predictiveFCells )
+#        print( "Active: ", self.activeFCells )
 
-        # Generate new predictive cells.
-#        self.PredictCells( oldActive, newActive )
+        # If there are enough columns bursting then we consider this a new feature, and not just noise.
+        if len( burstingCols ) >= self.activationThreshold:
+            self.NewFeature( burstingCols, [ vectorX, vectorY ] )
