@@ -1,5 +1,6 @@
 import sys
 import numpy
+from random import randrange
 
 from htm.bindings.sdr import SDR, Metrics
 import htm.bindings.encoders
@@ -75,32 +76,32 @@ class AgentOrange:
 
         self.vp = VectorMemory(
             columnDimensions          = 2048,
-            cellsPerColumn            = 32,
+            cellsPerColumn            = 4,
             numObjectCells            = 1000,
-            activationThreshold       = 13,
-            initialPermanence         = 0.21,
-            connectedPermanence       = 0.1,
+            FActivationThreshold      = 13,
+            initialPermanence         = 0.2,
             permanenceIncrement       = 0.1,
-            permanenceDecrement       = 0.1,
+            permanenceDecrement       = 0.01,
+            segmentDecay              = 200,
             initialPosVariance        = 10,
             OCellActivation           = 20,
-            maxNewSynapseCount        = 20,
-            shiftMultiplier           = 0.1,
-            initialFlexibility        = 1,
-            maxSegmentsPerCell        = 128,
-            maxSynapsesPerSegment     = 32,
-#            potentialPct              = 10,         # INCREASE THIS LATER, SMALL FOR TESTING SPEED
+            OActivationThreshold      = 13,
+            maxNewFToFSynapses        = 128,
+            maxSegmentsPerCell        = 32,
+            maxNewOToFSynapses        = 128,
         )
 
-        self.lastX = 0
-        self.lastY = 0
+        self.lastVector = [ 0, 0 ]
+        self.newVector  = [ 0, 0 ]
 
 #        self.whatColour = Classifier( alpha = 1 )
 
-    def PrintBitRep( self, whatPrintRep ):
+    def PrintBitRep( self, whatPrintRep, centerX, centerY ):
     # Prints out the bit represention.
 
         print ( "\n" )
+
+        print("CenterX: ", centerX, ", CenterY: ", centerY )
 
         for y in range( self.resolutionY ):
             for x in range( self.resolutionX ):
@@ -137,7 +138,7 @@ class AgentOrange:
                 else:
                     localBitRep.append( x + ( y * self.resolutionX ) )
 
-        self.PrintBitRep( localBitRep )
+        self.PrintBitRep( localBitRep, centerX, centerY )
 
         bitRepSDR = SDR( maxArraySize )
         bitRepSDR.sparse = numpy.unique( localBitRep )
@@ -165,9 +166,26 @@ class AgentOrange:
         # Encode the input column SDR for current position.
         senseSDR = self.EncodeSenseData( sensePosX, sensePosY, objX, objY, objW, objH, objC )
 
-        # Compute cell activation and generate next predicted cells.
-        self.vp.Compute( senseSDR, sensePosX - self.lastX, sensePosY - self.lastY )
+        # Generate random motion vector for next time step.
+        self.lastVector = self.newVector.copy()
+        whichPos = randrange( 4 )
+        chosePos = [ 100, 100 ]
+        if whichPos == 0:
+            chosePos[ 0 ] = 100
+            chosePos[ 1 ] = 100
+        elif whichPos == 1:
+            chosePos[ 0 ] = -100
+            chosePos[ 1 ] = -100
+        elif whichPos == 2:
+            chosePos[ 0 ] = -100
+            chosePos[ 1 ] = 100
+        elif whichPos == 3:
+            chosePos[ 0 ] = 100
+            chosePos[ 1 ] = -100
+        self.newVector[ 0 ] = chosePos[ 0 ] - sensePosX
+        self.newVector[ 1 ] = chosePos[ 1 ] - sensePosY
 
-        # Update the last positions to be used for vector or change in position.
-        self.lastX = sensePosX
-        self.lastY = sensePosY
+        # Compute cell activation and generate next predicted cells.
+        self.vp.Compute( senseSDR, self.lastVector, self.newVector )
+
+        return self.newVector

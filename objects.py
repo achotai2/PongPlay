@@ -1,7 +1,6 @@
 import numpy
 
 from agent_objects import AgentOrange
-from random import randrange
 
 # Dimensions of screen.
 screenWidth  = 800
@@ -58,19 +57,9 @@ while True:
 #    elif boxColour == 3:
 #        boxColour = 1
 #        box.color( "red" )
-    whichPos = randrange( 4 )
-    if whichPos == 0:
-        sensePosX = 100
-        sensePosY = 100
-    if whichPos == 1:
-        sensePosX = -100
-        sensePosY = -100
-    if whichPos == 2:
-        sensePosX = -100
-        sensePosY = 100
-    if whichPos == 3:
-        sensePosX = 100
-        sensePosY = -100
-    senseOrgan.goto( sensePosX, sensePosY )
 
-    Agent1.Brain( objCenterX, objCenterY, objWidth, objHeight, boxColour, sensePosX, sensePosY )
+    organVector = Agent1.Brain( objCenterX, objCenterY, objWidth, objHeight, boxColour, sensePosX, sensePosY )
+
+    sensePosX += organVector[ 0 ]
+    sensePosY += organVector[ 1 ]
+    senseOrgan.goto( sensePosX, sensePosY )
