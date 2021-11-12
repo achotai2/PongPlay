@@ -133,7 +133,7 @@ class OSegment:
         else:
             return False
 
-
+# CAN PROBABLY DELETE THESE AND JUST HAVE THE CELLS STORED AS INDICES IN LISTS IN VECTOR MEMORY.
 class FCell:
 
     def __init__( self, ID ):
@@ -142,7 +142,6 @@ class FCell:
         self.ID             = ID
         self.active         = False     # Means column burst, or cell was predictive and then column fired.
         self.predictive     = False     # Means synapses on connected segments above activationThreshold.
-        self.terminalWinner = 0         # Number of OSegments this cell is chosen as the terminal FCell winner for.
 
 class OCell:
 
