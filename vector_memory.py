@@ -1,20 +1,19 @@
 from random import sample, randrange
-from cell_and_synapse import FCell, OCell, OSegment, BinarySearch, NoRepeatInsort, RepeatInsort
+from cell_and_synapse import FCell, OCell, Segment, BinarySearch, IndexIfItsIn, NoRepeatInsort, RepeatInsort
 import numpy as np
 from time import time
-from bisect import bisect_left
 
 class VectorMemory:
 
     def __init__( self, columnDimensions, cellsPerColumn, numObjectCells, FActivationThreshold, initialPermanence,
         permanenceIncrement, permanenceDecrement, segmentDecay, initialPosVariance, OCellActivation, OActivationThreshold,
-        maxNewFToFSynapses, maxSegmentsPerCell, maxNewOToFSynapses ):
+        maxNewFToFSynapses, maxSegmentsPerCell, maxNewOToFSynapses, equalityThreshold ):
 
         self.columnDimensions     = columnDimensions         # Dimensions of the column space.
         self.FCellsPerColumn      = cellsPerColumn           # Number of cells per column.
         self.numObjectCells       = numObjectCells           # Number of cells in the Object level.
-        self.FActivationThreshold = FActivationThreshold     # Threshold of active connected FToFSynapses...
-                                                             # needed to activate FSegment.
+        self.FActivationThreshold = FActivationThreshold     # Threshold of active connected incident synapses...
+                                                             # needed to activate segment.
         self.initialPermanence    = initialPermanence        # Initial permanence of a new synapse.
         self.permanenceIncrement  = permanenceIncrement      # Amount by which permanences of synapses are incremented during learning.
         self.permanenceDecrement  = permanenceDecrement      # Amount by which permanences of synapses are decremented during learning.
@@ -26,26 +25,27 @@ class VectorMemory:
         self.maxNewFToFSynapses   = maxNewFToFSynapses       # The maximum number of FToFSynapses added to a segment during creation.
         self.maxSegmentsPerCell   = maxSegmentsPerCell       # The maximum number of segments per cell.
         self.maxNewOToFSynapses   = maxNewOToFSynapses       # The maximum number of FToFSynapses added to a segment during creation.
+        self.equalityThreshold    = equalityThreshold        # The number of equal synapses for two segments to be considered identical.
 
         # --------Create all the cells in the network.---------
         # Create cells in feature layer.
         self.FCells = []
         for i in range( columnDimensions * cellsPerColumn ):
             self.FCells.append( FCell( i ) )
-        self.activeFCells     = []
-        self.lastActiveFCells = []
-        self.lastActiveColumn = []
-        self.predictiveFCells = []
+        self.activeFCells      = []
+        self.lastActiveFCells  = []
+        self.lastActiveColumns = []
+        self.predictiveFCells  = []
 
-        # Create empty array for storing OSegments.
-        self.OSegments        = []
+        # Create empty array for storing segments.
+        self.segments       = []
+        self.lastActiveSegs = []
+        self.activeSegs     = []
 
         # Create cells in object layer.
         self.OCells = []
         for o in range( numObjectCells ):
             self.OCells.append( OCell( o ) )
-            # Create a random set of active object cells to start.
-        self.activeOCells = sorted( sample( range( numObjectCells ), OCellActivation ) )
 
     def ActivateFCells( self, columnSDR ):
     # Uses activated columns and cells in predictive state to put cells in active states.
@@ -77,175 +77,137 @@ class VectorMemory:
 
         print( "Bursting Pct: ", len( burstingCols ) / self.columnDimensions * 100, "%" )
 
-    def CreateOSegment( self, col, vector ):
-    # Create a new OSegment, terminal on this FCell, with lateral synapses attached to incidentFCells,
-    # and upwards synapses attached to attachedOCells.
-    # Returns a list of the incidentFCell synapses created.
-
-# SHOULD INCLUDE MAX SYNAPSES AND MAX SEGMENTS PER CELL.
-
-        # New segment terminal on all cells in column.
-        terminalFCellList = list( range( col * self.FCellsPerColumn, ( col * self.FCellsPerColumn ) + self.FCellsPerColumn ) )
-
-        # New segment incident on all cells in all lastActive columns.
-# THIS WILL CHANGE TO ONLY CERTAIN LAST ACTIVE COLUMNS.
-        incidentFCellList = []
-        for lACol in self.lastActiveColumn:
-            for lACell in range( lACol * self.FCellsPerColumn, ( lACol * self.FCellsPerColumn ) + self.FCellsPerColumn ):
-                incidentFCellList.append( lACell )
-
-        newSegment = OSegment( self.activeOCells, terminalFCellList, col, incidentFCellList, self.initialPermanence, vector, self.initialPosVariance )
-        insertIdx = RepeatInsort( self.OSegments, newSegment )
-
     def IncrementSegTime( self, segsToDeleteList ):
     # Increment every OSegments timeSinceActive.
 
-        for segIndx in range( len( self.OSegments ) ):
-            self.OSegments[ segIndx ].timeSinceActive += 1
+        for segIndx in range( len( self.segments ) ):
+            self.segments[ segIndx ].timeSinceActive += 1
 
-            if self.OSegments[ segIndx ].timeSinceActive >= self.segmentDecay:
-                segsToDeleteList.append( segIndx )
+            if self.segments[ segIndx ].timeSinceActive > self.segmentDecay:
+                NoRepeatInsort( segsToDeleteList, segIndx )
 
     def DeleteSegments( self, segsToDeleteList ):
     # Deletes all segments in segsToDeleteList.
 
         for index in sorted( segsToDeleteList, reverse = True ):
-            del self.OSegments[ index ]
+            del self.segments[ index ]
 
-    def AdjustSynapses( self, toDelete, cellList, winnerCell, permanenceList, checkCol ):
-    # Adjust the synapse permancenes in permanenceList.
+    def CreateSegment( self, columnSDR, vector ):
+    # Create a new Segment, terminal on these active columns, incident on last active columns.
 
-        for idx in range( len( cellList ) ):
-            if cellList[ idx ] == winnerCell:
-                if permanenceList[ idx ] < 1.0:
-                    permanenceList[ idx ] += self.permanenceIncrement
+        newSegment = Segment( columnSDR.sparse, self.lastActiveColumns, self.initialPermanence, self.columnDimensions, self.FCellsPerColumn, vector, self.initialPosVariance )
+        self.segments.append( newSegment )
+        self.activeSegs.append( len( self.segments ) - 1 )
+
+    def SegmentActivation( self, columnSDR, lastVector ):
+    # Check if there are active segments terminating on above threshold # of active cells.
+    # If none exist then the present result wasn't predicted; create a new segment and activate it.
+    # De-activate all previously active segments.
+
+        validActiveSeg   = []
+
+        if len( self.segments ) > 0 and len( self.activeSegs ) > 0:
+            for activeSegment in self.activeSegs:
+
+                # If the segment is overpredicted or overpredicting then we want to fracture it into two segments;
+                # We can do this in two steps by fracturing the overpredicting first.
+                if self.segments[ activeSegment ].numActiveTerminal >= len( columnSDR.sparse ) * 2 :
+                    newSegment = self.segments[ activeSegment ].NonActiveTerminalCopy( columnSDR.sparse, self.initialPermanence, self.columnDimensions, self.FCellsPerColumn, lastVector, self.initialPosVariance )
+                    self.segments.append( newSegment )
+                elif self.segments[ activeSegment ].numActiveIncident >= len( columnSDR.sparse ) * 2 :
+                    newSegment = self.segments[ activeSegment ].NonActiveIncidentCopy( self.lastActiveColumns, self.initialPermanence, self.columnDimensions, self.FCellsPerColumn, lastVector, self.initialPosVariance )
+                    self.segments.append( newSegment )
+
+# IMPLEMENT THE CREATION OF THE SEGMENT, THEN HAVE IT SO THAT IF MULTIPLE SEGS ARE ACTIVATING A PARTICULAR CELL
+# ONLY THE ONE WITH THE HIGHEST TOTAL OVERLAP GETS TO COUNT THAT CELL FOR ITS OWN. BASICALLY, WHEN CALCULATING
+# OVERLAP MAKE A LIST OF ALL THE OVERLAPPING CELLS; SORT THE LIST BY HIGHEST TOTAL OVERLAP TO LOWEST. THEN GO
+# THROUGH THE LIST, STARTING WITH THE HIGHEST TOTAL OVERLAP SEGMENT, AND REMOVE ANY MORE INSTANCES OF A PARTICULAR
+# CELL FROM ANY LOWER OVERLAP SEGS. THEN ONLY ACTIVATE THE SEGMENTS WITH ABOVE THRESHOLD OVERLAP AFTER THIS IS DONE.
+
+                overlappingCells = self.segments[ activeSegment ].CheckIfPredicting( self.activeFCells, self.FCellsPerColumn, lastVector )
+
+                if len( overlappingCells ) >= self.FActivationThreshold:
+                    NoRepeatInsort( validActiveSeg, activeSegment )
+                    self.segments[ activeSegment ].timeSinceActive = 0
+
                 else:
-                    permanenceList[ idx ] = 1.0
-            elif checkCol == -1 or int( cellList[ idx ] / self.FCellsPerColumn ) == checkCol:
-                if permanenceList[ idx ] > 0.0:
-                    permanenceList[ idx ] -= self.permanenceDecrement
-                else:
-                    permanenceList[ idx ] = 0.0
-                    toDelete.append( idx )
+                    self.segments[ activeSegment ].active = False
 
-        return permanenceList
+        self.activeSegs = validActiveSeg
 
-    def DeleteSynapses( self, synapsesToDelete, segsToDelete, synapseList1, synapseList2, segIndex ):
-    # Delete synapses whose permanence connection has gone to 0.0.
+        if len( self.activeSegs ) == 0:
+            self.CreateSegment( columnSDR, lastVector )
 
-        if len( synapsesToDelete ) > 0:
-            for index in sorted( synapsesToDelete, reverse = True ):
-                del synapseList1[ index ]
-                del synapseList2[ index ]
-            # If there are no synapses of this type left then delete the segment.
-            if len( synapseList1 ) == 0:
-                segsToDelete.append( segIndex )
+    def CheckIfSegsIdentical( self, segsToDelete ):
+    # Compares all active segments to see if they have identical vectors and active synapse bundles.
+    # If any do then delete one of them.
 
-    def OSegmentLearning( self, columnSDR, lastVector ):
-    # Perform learning on OSegments, and create new ones if neccessary.
+        if len( self.activeSegs ) > 1:
+            for actSeg1 in self.activeSegs:
+                for actSeg2 in self.activeSegs:
+                    if actSeg1 != actSeg2:
+                        if self.segments[ actSeg1 ].Equality( self.segments[ actSeg2 ], self.equalityThreshold ):
+                            NoRepeatInsort( segsToDelete, actSeg2 )
 
-# RIGHT NOW THERE IS NO IMPULSE TO DECAY SYNAPSES THAT AREN'T EVER USED BUT APPEAR ON A SEGMENT THAT IS USED A
-# LOT. THEY MIGHT HAVE BEEN CREATED WHEN THE COLUMN RANDOMLY ACTIVATED, OR THROUGH NOISE, BUT THEY ARENT PART OF
-# THE NORMAL REPRESENTATION FOR THE FEATURE. THESE SHOULD DECAY BY APPLYING A SMALL DECAY TO SYNAPSES THAT DONT
-# CONNECT TO ACTIVE CELLS WHEN THE SEGMENT LEARNS, NOT JUST THE LOSER CELLS IN COLUMNS THAT DO FIRE.
-# CONNECTED TO THIS, IF WE SEE A NEW FEATURE THAT IS SORT OF LIKE AN OLD ONE WE CAN ADD NEW SYNAPSES TO THE NEW
-# ACTIVE COLUMNS, IF THESE COLUMNS ACTIVATE OFTEN ENOUGH THEN THEY WILL BECOME A PART OF THE SEGMENTS REPRESENTATION
-# FOR THAT FEATURE.
+    def SegmentLearning( self, columnSDR, lastVector ):
+    # Perform learning on segments, and create new ones if neccessary.
 
-        if len( self.OSegments ) > 0:
-            segsToDelete = []
+        segsToDelete = []
 
-            # Look for last active OSegments (meaning it predicted) terminal on all last active columns.
-            # Then find presently active columns that have segments incident on them. Choose the winner cell
-            # from these segments (as being the one with the strongest synapse) and support its synapses, weaken losers.
-            for lCol in self.lastActiveColumn:
+        # Add time to all segments, and delete segments that haven't been active in a while.
+        self.IncrementSegTime( segsToDelete )
 
-                lColIndex = bisect_left( self.OSegments, lCol )
-                while lColIndex < len( self.OSegments ) and self.OSegments[ lColIndex ].terminalColumn == lCol:
-                    if self.OSegments[ lColIndex ].primed and self.OSegments[ lColIndex ].lastActive:
-                        highestSynapse = 0.0
-                        chosenCell     = lCol * self.FCellsPerColumn
+        # Segment activation and create segments if none are active.
+        self.SegmentActivation( columnSDR, lastVector )
 
-# HAVE TO BE CAREFUL HERE ONCE WE INCLUDE OTHER OBJECT REPS: WE WANT TO MAKE SURE THE SEGMENTS ARE LOOKING AT ALL ATTACH
-# TO THE SAME OBJECT CELLS (WITH HIGH ENOUGH OVERLAP), OTHERWISE WE WILL BE COMBINING REPS THAT HAVE ALREADY FRACTURED.
+        # If there is more than one segment active check if they are idential, if so delete one.
+        self.CheckIfSegsIdentical( segsToDelete )
 
-                        for lTCell in range( len( self.OSegments[ lColIndex ].terminalFCells ) ):
-                            if self.OSegments[ lColIndex ].OToFPermanences[ lTCell ] > highestSynapse:
-                                highestSynapse = self.OSegments[ lColIndex ].OToFPermanences[ lTCell ]
-                                chosenCell     = self.OSegments[ lColIndex ].terminalFCells[ lTCell ]
+        if len( self.activeSegs ) > 1:
+            for i in self.activeSegs:
+                print( self.segments[i])
 
-                        toAdjustPresent = []
-                        for pCol in columnSDR.sparse:
+        # For every active and lastActive segment...
+        if len( self.activeSegs ) > 0 and len( self.lastActiveSegs ) > 0:
 
-                            pColIndex = bisect_left( self.OSegments, pCol )
+            for activeSegIndex in self.activeSegs:
 
-                            while pColIndex < len( self.OSegments ) and self.OSegments[ pColIndex ].terminalColumn == pCol:
-                                if self.OSegments[ pColIndex ].primed and self.OSegments[ pColIndex ].active:
+                # If it has a positive synapses to non-active columns then decay them.
+                # If it doesn't have them to active columns then create them.
+                self.segments[ activeSegIndex ].DecayAndCreate( self.lastActiveColumns, columnSDR.sparse.tolist(), self.permanenceDecrement, self.initialPermanence )
 
-                                    toAdjustPresent.append( pColIndex )
+            # For all last active columns find a winner cell on the terminal synapses of the last active segments,
+            # and the incident synapses of the presently active segments.
+            for lastActiveCol in self.lastActiveColumns:
 
-                                    for pCell in range( len( self.OSegments[ pColIndex ].FToFSynapses ) ):
-                                        if int( self.OSegments[ pColIndex ].FToFSynapses[ pCell ] / self.FCellsPerColumn ) == lCol:
-                                            if self.OSegments[ pColIndex ].FToFPermanences[ pCell ] > highestSynapse:
+                winnerCell = ( 0, 0.0 )     # ( Cell position in column, Strongest permanence value )
 
-                                                highestSynapse = self.OSegments[ pColIndex ].FToFPermanences[ pCell ]
-                                                chosenCell     = self.OSegments[ pColIndex ].FToFSynapses[ pCell ]
+                # Go through all last active segments and look for winnerCell terminal on them in this column.
+                for lastActiveSegIndx in self.lastActiveSegs:
+                    winnerCellCheck = self.segments[ lastActiveSegIndx ].FindTerminalWinner( lastActiveCol, self.initialPermanence )
+                    if winnerCellCheck[ 1 ] > winnerCell[ 1 ]:
+                        winnerCell = winnerCellCheck
 
-                                    # If the segment has some learning done on it then reset its timeSinceActive;
-                                    # this is used to keep track of segments that rarely become active, to delete.
-                                    self.OSegments[ pColIndex ].timeSinceActive = 0
+                # Go through all presently active segments and look for winnerCell incident on them in this column.
+                # If any of these segments don't have any incident synapses at this column then create random ones.
+                for activeSegIndex in self.activeSegs:
+                    winnerCellCheck = self.segments[ activeSegIndex ].FindIncidentWinner( lastActiveCol, self.initialPermanence )
+                    if winnerCellCheck[ 1 ] > winnerCell[ 1 ]:
+                        winnerCell = winnerCellCheck
 
-                                pColIndex += 1
+                # Now that we've found winner support the winner, and decay the loser, on this columns synapses.
+                for lastActiveSegIndx in self.lastActiveSegs:
+                    self.segments[ lastActiveSegIndx ].SupportTerminalWinner( lastActiveCol, winnerCell[ 0 ], self.permanenceIncrement, self.permanenceDecrement )
 
-                        # Adjust terminal synapses going to the winner cell, and the loser cells.
-                        toDelete = []
-                        self.OSegments[ lColIndex ].OToFPermanences = self.AdjustSynapses(
-                            toDelete, self.OSegments[ lColIndex ].terminalFCells, chosenCell,
-                            self.OSegments[ lColIndex ].OToFPermanences, -1
-                            )
-                        # Delete those synapses that have decayed to 0.0.
-                        self.DeleteSynapses(
-                            toDelete, segsToDelete, self.OSegments[ lColIndex ].terminalFCells,
-                            self.OSegments[ lColIndex ].OToFPermanences, lColIndex
-                            )
+                for activeSegIndex in self.activeSegs:
+                    self.segments[ activeSegIndex ].SupportIncidentWinner( lastActiveCol, winnerCell[ 0 ], self.permanenceIncrement, self.permanenceDecrement )
 
-                        for idx in toAdjustPresent:
-                            toDelete = []
-                            # Adjust incident synapses going to the winner cell, and the loser cells.
-                            self.OSegments[ idx ].FToFPermanences = self.AdjustSynapses(
-                                toDelete, self.OSegments[ idx ].FToFSynapses, chosenCell,
-                                self.OSegments[ idx ].FToFPermanences, lCol )
-                            # Delete those synapses that have decayed to 0.0.
-                            self.DeleteSynapses(
-                                toDelete, segsToDelete, self.OSegments[ idx ].FToFSynapses,
-                                self.OSegments[ idx ].FToFPermanences, idx
-                                )
+# HAVEN'T MADE IT SO THOSE WITH REMOVED SYNAPSES ARE ADDED TO segsToDelete.
+# COULD ACTUALLY GET RID OF timeSinceActive, AND MAKE EVERY SYNAPSE BELOW 1.0 DECAY EVERY TIME STEP
+# THEN WHEN ONE SEGMENT REACHES ALL 0.0 WE DELETE IT.
 
-                    lColIndex += 1
-
-            # Check if there are active segments terminating on the currently active columns.
-            # If none exist then the present result wasn't predicted; create a new segment.
-            for col in columnSDR.sparse:
-                colIndex = bisect_left( self.OSegments, col )
-                thisColHasActiveSeg = False
-                while colIndex < len( self.OSegments ) and self.OSegments[ colIndex ].terminalColumn == col:
-                    if self.OSegments[ colIndex ].primed and self.OSegments[ colIndex ].active:
-                        thisColHasActiveSeg = True
-                    colIndex += 1
-                # If no cells in column have active OSegments then burst create segments to active OCells.
-                if not thisColHasActiveSeg:
-                    self.CreateOSegment( col, lastVector )
-
-            # Add time to all segments, and delete segments that haven't been active in a while.
-            self.IncrementSegTime( segsToDelete )
-            # Delete segments that had all their FToFSynapses's or terminalFCells removed.
-# PROBABLY SHOULD MAKE IT SO SEGMENTS WITH ALL SYNAPSES AT 1.0 DONT EVER GET DESTROYED, THEY ARE IN LONG TERM MEMORY.
-            self.DeleteSegments( segsToDelete )
-
-        # If there are no OSegments at all yet (just starting program) then burst create for all active columns.
-        elif len( self.lastActiveFCells ) > 0:
-                for col in columnSDR.sparse:
-                    self.CreateOSegment( col, lastVector )
+        # Delete segments that had all their incident or terminal synapses removed.
+        self.DeleteSegments( segsToDelete )
 
     def PredictFCells( self, vector ):
     # Clear old predicted FCells and generate new predicted FCells.
@@ -253,29 +215,34 @@ class VectorMemory:
         # Clean up old predictive cells.
         for pCell in self.predictiveFCells:
             self.FCells[ pCell ].predictive = False
+
         self.predictiveFCells = []
+        self.activeSegs       = []
+        self.lastActiveSegs   = []
 
-        # Check every activeFCell's OSegments, and activate or deactivate them; make FCell predictive or not.
-        for seg in self.OSegments:
+        # Check every activeFCell's segments, and activate or deactivate them; make FCell predictive or not.
+        for index in range( len( self.segments ) ):
+
             # Make previously active segments lastActive (used in segment learning).
-            if seg.primed:
-                if seg.active == True:
-                    seg.lastActive = True
-                else:
-                    seg.lastActive = False
+            if self.segments[ index ].active == True:
+                self.segments[ index ].lastActive = True
+                self.lastActiveSegs.append( index )
+            else:
+                self.segments[ index ].lastActive = False
 
-                if ( seg.Inside( vector )
-                    and seg.FCellOverlap( self.activeFCells, self.FActivationThreshold ) ):
-                        seg.active = True
+            if self.segments[ index ].CheckIfPredicted( self.activeFCells, self.FActivationThreshold, self.FCellsPerColumn, vector ):
 
-                        for termFCell in seg.terminalFCells:
-                            self.FCells[ termFCell ].predictive = True
-                            NoRepeatInsort( self.predictiveFCells, termFCell )
+                    self.segments[ index ].active = True
+                    self.activeSegs.append( index )
 
-#                        if len( seg.terminalFCells ) >= 3:
-#                            print("Cell: ", seg )
-                else:
-                    seg.active = False
+                    terminalFCellList = self.segments[ index ].ReturnTerminalFCells( self.FCellsPerColumn )
+
+                    for cell in terminalFCellList:
+                        self.FCells[ cell ].predictive = True
+                        NoRepeatInsort( self.predictiveFCells, cell )
+
+            else:
+                self.segments[ index ].active = False
 
     def Compute( self, columnSDR, lastVector, newVector ):
     # Compute the action of vector memory, and learn on the synapses.
@@ -284,18 +251,23 @@ class VectorMemory:
         self.ActivateFCells( columnSDR )
 
         # Perform learning on OSegments.
-        self.OSegmentLearning( columnSDR, lastVector )
+        if len( self.lastActiveColumns ) > 0:
+            self.SegmentLearning( columnSDR, lastVector )
+
+        print( "# of Active Segs: ", len( self.activeSegs ), ", ActiveSegs: ", self.activeSegs )
+        print( "# of LastActive Segs: ", len( self.lastActiveSegs ), ", LastActiveSegs: ", self.lastActiveSegs )
 
         # Use FSegments to predict next set of inputs, given newVector.
         self.PredictFCells( newVector )
 
-        self.lastActiveColumn = columnSDR.sparse.tolist()
+        self.lastActiveColumns = columnSDR.sparse.tolist()
 
 #        toPrint = []
-#        for seg in self.OSegments:
-#            toPrint.append( ( len( seg.FToFPermanences ), seg.timeSinceActive ) )
+#        for seg in self.segments:
+#            print( seg )
 #        print( "FToFSynapse lengths: ", toPrint )
         print( "Active Cells: ", self.activeFCells )
+        print( "Predictive Cells: ", self.predictiveFCells )
         print( "Number Active Cells: ", len( self.activeFCells ) )
         print( "Number Predictive Cells: ", len( self.predictiveFCells ) )
-        print( "Number of OSegments: ", len( self.OSegments ) )
+        print( "Number of Segments: ", len( self.segments ) )

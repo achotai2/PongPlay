@@ -78,7 +78,7 @@ class AgentOrange:
             columnDimensions          = 2048,
             cellsPerColumn            = 4,
             numObjectCells            = 1000,
-            FActivationThreshold      = 13,
+            FActivationThreshold      = 20,
             initialPermanence         = 0.2,
             permanenceIncrement       = 0.1,
             permanenceDecrement       = 0.01,
@@ -89,6 +89,7 @@ class AgentOrange:
             maxNewFToFSynapses        = 128,
             maxSegmentsPerCell        = 32,
             maxNewOToFSynapses        = 128,
+            equalityThreshold         = 35
         )
 
         self.lastVector = [ 0, 0 ]
