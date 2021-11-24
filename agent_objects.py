@@ -80,16 +80,18 @@ class AgentOrange:
             numObjectCells            = 1000,
             FActivationThreshold      = 20,
             initialPermanence         = 0.2,
+            lowerThreshold            = 0.1,
             permanenceIncrement       = 0.1,
-            permanenceDecrement       = 0.01,
+            permanenceDecrement       = 0.05,
             segmentDecay              = 200,
             initialPosVariance        = 10,
             OCellActivation           = 20,
             OActivationThreshold      = 13,
             maxNewFToFSynapses        = 128,
             maxSegmentsPerCell        = 32,
-            maxNewOToFSynapses        = 128,
-            equalityThreshold         = 35
+            maxBundlesPerSegment      = 45,
+            maxBundlesToAddPer        = 5,
+            equalityThreshold         = 25
         )
 
         self.lastVector = [ 0, 0 ]
@@ -97,30 +99,30 @@ class AgentOrange:
 
 #        self.whatColour = Classifier( alpha = 1 )
 
-    def PrintBitRep( self, whatPrintRep, centerX, centerY ):
+    def ReturnEndState( self, log_data ):
+    # Prepares details on the agents end state to print into the log file.
+
+        self.vp.ReturnCellsAndSynapses( log_data )
+
+    def PrintBitRep( self, whatPrintRep, centerX, centerY, log_data ):
     # Prints out the bit represention.
 
-        print ( "\n" )
-
-        print("CenterX: ", centerX, ", CenterY: ", centerY )
+        log_data.append( "CenterX: " + str( centerX ) + ", CenterY: " + str( centerY ) )
 
         for y in range( self.resolutionY ):
+            log_input = ""
             for x in range( self.resolutionX ):
-                if x == self.resolutionX - 1:
-                    print ("ENDO")
-                    endRep = "\n"
-                else:
-                    endRep = ""
                     if x + ( y * self.resolutionX ) in whatPrintRep:
-                        print( 0, end = endRep )
+                        log_input = log_input + str( 0 )
                     elif ( x + ( y * self.resolutionX ) ) + ( self.resolutionX * self.resolutionY ) in whatPrintRep:
-                        print( 1, end = endRep )
+                        log_input = log_input + str( 1 )
                     elif ( x + ( y * self.resolutionX ) ) + ( 2 * self.resolutionX * self.resolutionY ) in whatPrintRep:
-                        print( 2, end = endRep )
+                        log_input = log_input + str( 2 )
                     elif ( x + ( y * self.resolutionX ) ) + ( 3 * self.resolutionX * self.resolutionY ) in whatPrintRep:
-                        print( 3, end = endRep )
+                        log_input = log_input + str( 3 )
+            log_data.append( log_input )
 
-    def BuildLocalBitRep( self, centerX, centerY, objX, objY, objW, objH, objC ):
+    def BuildLocalBitRep( self, centerX, centerY, objX, objY, objW, objH, objC, log_data ):
     # Builds a bit-rep SDR of localDim dimensions centered around point with resolution.
     # centerX and centerY is the center point of our vision field.
     # objX and objY: origin point of the object we are examining, objC: object colour, objW and objH: height and width.
@@ -139,18 +141,18 @@ class AgentOrange:
                 else:
                     localBitRep.append( x + ( y * self.resolutionX ) )
 
-        self.PrintBitRep( localBitRep, centerX, centerY )
+        self.PrintBitRep( localBitRep, centerX, centerY, log_data )
 
         bitRepSDR = SDR( maxArraySize )
         bitRepSDR.sparse = numpy.unique( localBitRep )
         return bitRepSDR
 
-    def EncodeSenseData ( self, sensePosX, sensePosY, objX, objY, objW, objH, objC ):
+    def EncodeSenseData ( self, sensePosX, sensePosY, objX, objY, objW, objH, objC, log_data ):
     # Get sensory information and encode it as an SDR in the sense network.
 
         # Encode colour
 #        colourBits = self.colourEncoder.encode( colour )
-        objBits = self.BuildLocalBitRep( sensePosX, sensePosY, objX, objY, objW, objH, objC )
+        objBits = self.BuildLocalBitRep( sensePosX, sensePosY, objX, objY, objW, objH, objC, log_data )
 
         # Concatenate all these encodings into one large encoding for Spatial Pooling.
 #        encoding = SDR( self.encodingWidth ).concatenate( [ colourBits ] )
@@ -162,10 +164,11 @@ class AgentOrange:
 #        self.whatColour.learn( pattern = senseSDR, classification = colour )
         return senseSDR
 
-    def Brain ( self, objX, objY, objW, objH, objC, sensePosX, sensePosY ):
+    def Brain ( self, objX, objY, objW, objH, objC, sensePosX, sensePosY, log_data ):
+    # The central brain function of the agent.
 
         # Encode the input column SDR for current position.
-        senseSDR = self.EncodeSenseData( sensePosX, sensePosY, objX, objY, objW, objH, objC )
+        senseSDR = self.EncodeSenseData( sensePosX, sensePosY, objX, objY, objW, objH, objC, log_data )
 
         # Generate random motion vector for next time step.
         self.lastVector = self.newVector.copy()
@@ -187,6 +190,6 @@ class AgentOrange:
         self.newVector[ 1 ] = chosePos[ 1 ] - sensePosY
 
         # Compute cell activation and generate next predicted cells.
-        self.vp.Compute( senseSDR, self.lastVector, self.newVector )
+        self.vp.Compute( senseSDR, self.lastVector, self.newVector, log_data )
 
         return self.newVector
