@@ -24,17 +24,6 @@ def Within ( value, minimum, maximum, equality ):
         else:
             return False
 
-def Overlap ( SDR1, SDR2 ):
-# Computes overlap score between two passed SDRs.
-
-    overlap = 0
-
-    for cell1 in SDR1:
-        if cell1 in SDR2:
-            overlap += 1
-
-    return overlap
-
 class AgentOrange:
 
     def __init__( self, name, resX, resY ):
@@ -78,58 +67,86 @@ class AgentOrange:
             columnDimensions          = 2048,
             cellsPerColumn            = 4,
             numObjectCells            = 1000,
-            FActivationThreshold      = 20,
-            initialPermanence         = 0.2,
+            FActivationThresholdMin   = 20,
+            FActivationThresholdMax   = 25,
+            initialPermanence         = 0.3,
             lowerThreshold            = 0.1,
             permanenceIncrement       = 0.1,
             permanenceDecrement       = 0.05,
             segmentDecay              = 200,
             initialPosVariance        = 10,
-            OCellActivation           = 20,
             OActivationThreshold      = 13,
+            ObjectRepActivaton        = 25,
             maxNewFToFSynapses        = 128,
             maxSegmentsPerCell        = 32,
-            maxBundlesPerSegment      = 45,
+            maxBundlesPerSegment      = 50,
             maxBundlesToAddPer        = 5,
-            equalityThreshold         = 25
+            equalityThreshold         = 30,
+            pctAllowedOCellConns      = 0.8
         )
 
         self.lastVector = [ 0, 0 ]
         self.newVector  = [ 0, 0 ]
 
-#        self.whatColour = Classifier( alpha = 1 )
+        # Stats for end report.
+        self.top_left     = []
+        self.top_right    = []
+        self.bottom_left  = []
+        self.bottom_right = []
 
-    def ReturnEndState( self, log_data ):
-    # Prepares details on the agents end state to print into the log file.
+        self.localBitRep  = []
+        self.centerX      = 0
+        self.centerY      = 0
 
-        self.vp.ReturnCellsAndSynapses( log_data )
+#    def ReturnEndState( self, cell_report_data, segment_report_data ):
+#    # Prepares details on the agents end state to print into the log file.
+#
+#        self.vp.ReturnCellsAndSynapses( cell_report_data, segment_report_data )
 
-    def PrintBitRep( self, whatPrintRep, centerX, centerY, log_data ):
+    def ReturnSegmentState( self, timeStep ):
+    # Checks on every segment in self.vp and returns its state in a list.
+
+        return self.vp.ReturnSegmentData( timeStep )
+
+    def GetLogData( self ):
+    # Get the local log data and return it.
+
+        log_data = []
+
+        self.PrintBitRep( log_data )
+
+        self.vp.BuildLogData( log_data )
+
+        return log_data
+
+    def PrintBitRep( self, log_data ):
     # Prints out the bit represention.
 
-        log_data.append( "CenterX: " + str( centerX ) + ", CenterY: " + str( centerY ) )
+        log_data.append( "CenterX: " + str( self.centerX ) + ", CenterY: " + str( self.centerY ) )
 
         for y in range( self.resolutionY ):
             log_input = ""
             for x in range( self.resolutionX ):
-                    if x + ( y * self.resolutionX ) in whatPrintRep:
+                    if x + ( y * self.resolutionX ) in self.localBitRep:
                         log_input = log_input + str( 0 )
-                    elif ( x + ( y * self.resolutionX ) ) + ( self.resolutionX * self.resolutionY ) in whatPrintRep:
+                    elif ( x + ( y * self.resolutionX ) ) + ( self.resolutionX * self.resolutionY ) in self.localBitRep:
                         log_input = log_input + str( 1 )
-                    elif ( x + ( y * self.resolutionX ) ) + ( 2 * self.resolutionX * self.resolutionY ) in whatPrintRep:
+                    elif ( x + ( y * self.resolutionX ) ) + ( 2 * self.resolutionX * self.resolutionY ) in self.localBitRep:
                         log_input = log_input + str( 2 )
-                    elif ( x + ( y * self.resolutionX ) ) + ( 3 * self.resolutionX * self.resolutionY ) in whatPrintRep:
+                    elif ( x + ( y * self.resolutionX ) ) + ( 3 * self.resolutionX * self.resolutionY ) in self.localBitRep:
                         log_input = log_input + str( 3 )
             log_data.append( log_input )
 
-    def BuildLocalBitRep( self, centerX, centerY, objX, objY, objW, objH, objC, log_data ):
+    def BuildLocalBitRep( self, centerX, centerY, objX, objY, objW, objH, objC ):
     # Builds a bit-rep SDR of localDim dimensions centered around point with resolution.
     # centerX and centerY is the center point of our vision field.
     # objX and objY: origin point of the object we are examining, objC: object colour, objW and objH: height and width.
 
         maxArraySize = self.resolutionX * self.resolutionY * 4
 
-        localBitRep = []
+        self.localBitRep = []
+        self.centerX     = centerX
+        self.centerY     = centerY
 
         # Object bits.
         for x in range( self.resolutionX ):
@@ -137,22 +154,20 @@ class AgentOrange:
                 posX = x - ( self.resolutionX / 2 ) + centerX
                 posY = y - ( self.resolutionY / 2 ) + centerY
                 if Within( posX, objX - objW, objX + objW, True ) and Within( posY, objY - objH, objY + objH, True ):
-                    localBitRep.append( x + ( y * self.resolutionX ) + (objC * self.resolutionX * self.resolutionY ) )
+                    self.localBitRep.append( x + ( y * self.resolutionX ) + (objC * self.resolutionX * self.resolutionY ) )
                 else:
-                    localBitRep.append( x + ( y * self.resolutionX ) )
-
-        self.PrintBitRep( localBitRep, centerX, centerY, log_data )
+                    self.localBitRep.append( x + ( y * self.resolutionX ) )
 
         bitRepSDR = SDR( maxArraySize )
-        bitRepSDR.sparse = numpy.unique( localBitRep )
+        bitRepSDR.sparse = numpy.unique( self.localBitRep )
         return bitRepSDR
 
-    def EncodeSenseData ( self, sensePosX, sensePosY, objX, objY, objW, objH, objC, log_data ):
+    def EncodeSenseData ( self, sensePosX, sensePosY, objX, objY, objW, objH, objC ):
     # Get sensory information and encode it as an SDR in the sense network.
 
         # Encode colour
 #        colourBits = self.colourEncoder.encode( colour )
-        objBits = self.BuildLocalBitRep( sensePosX, sensePosY, objX, objY, objW, objH, objC, log_data )
+        objBits = self.BuildLocalBitRep( sensePosX, sensePosY, objX, objY, objW, objH, objC )
 
         # Concatenate all these encodings into one large encoding for Spatial Pooling.
 #        encoding = SDR( self.encodingWidth ).concatenate( [ colourBits ] )
@@ -164,11 +179,11 @@ class AgentOrange:
 #        self.whatColour.learn( pattern = senseSDR, classification = colour )
         return senseSDR
 
-    def Brain ( self, objX, objY, objW, objH, objC, sensePosX, sensePosY, log_data ):
+    def Brain ( self, objX, objY, objW, objH, objC, sensePosX, sensePosY ):
     # The central brain function of the agent.
 
         # Encode the input column SDR for current position.
-        senseSDR = self.EncodeSenseData( sensePosX, sensePosY, objX, objY, objW, objH, objC, log_data )
+        senseSDR = self.EncodeSenseData( sensePosX, sensePosY, objX, objY, objW, objH, objC )
 
         # Generate random motion vector for next time step.
         self.lastVector = self.newVector.copy()
@@ -190,6 +205,6 @@ class AgentOrange:
         self.newVector[ 1 ] = chosePos[ 1 ] - sensePosY
 
         # Compute cell activation and generate next predicted cells.
-        self.vp.Compute( senseSDR, self.lastVector, self.newVector, log_data )
+        self.vp.Compute( senseSDR, self.lastVector, self.newVector )
 
         return self.newVector
