@@ -184,6 +184,8 @@ class Segment:
         self.timeSinceActive     = 0          # Time steps since this segment was active last.
         self.numWinners          = 0          # The number of synapse bundles that have selected a winner.
         self.activationThreshold = minActivation
+        self.toPrime             = []         # The segments that appear right after this one that might become primed.
+        self.toPrimePermanences  = []         # The permanence connections to the toPrime segments.
 
         # FSegment portion--------
         self.terminalSynapses = []
@@ -234,12 +236,64 @@ class Segment:
         activeBundlesTerminalString = []
         for actBTer in self.activeBundlesTerminal:
             activeBundlesTerminalString.append( ( actBTer, self.terminalSynapses[ actBTer ].synapses ) )
+
         activeBundlesIncidentString = []
         for actBIns in self.activeBundlesIncident:
             activeBundlesIncidentString.append( ( actBIns, self.incidentSynapses[ actBIns ].synapses ) )
 
-        return ( "< Vector: %s, \n Active: %s, Last Active: %s, Time Since Active: %s, Activation Threshold: %s \n Active Terminal Columns: %s, %s, \n Active Incident Columns: %s, %s > \n"
-            % (self.vector, self.active, self.lastActive, self.timeSinceActive, self.activationThreshold, len( self.activeBundlesIncident ), activeBundlesIncidentString, len( self.activeBundlesTerminal ), activeBundlesTerminalString ) )
+        primedSegString = []
+        for index, pSeg in enumerate( self.toPrime ):
+            primedSegString.append( ( pSeg, self.toPrimePermanences[ index ] ) )
+
+        return ( "< Vector: %s, \n Active: %s, Last Active: %s, Time Since Active: %s, Activation Threshold: %s \n Active Incident Columns: %s, %s, \n Active Terminal Columns: %s, %s \n Primed Connections: %s > \n"
+            % (self.vector, self.active, self.lastActive, self.timeSinceActive, self.activationThreshold, len( self.activeBundlesIncident ), activeBundlesIncidentString, len( self.activeBundlesTerminal ), activeBundlesTerminalString, primedSegString ) )
+
+    def AddToPrime( self, segmentsToAdd, initialPermanence, permanenceIncrement, permanenceDecay ):
+    # If segmentsToAdd isn't in self.toPrime then adds it with initialPermanence.
+    # If segmentsToAdd is in then support its permanence.
+    # Decay all permanences below 1.0.
+
+        self.self_record.append( "ADD TO PRIME SEGMENT" )
+
+        for addSeg in segmentsToAdd:
+            idx = bisect_left( self.toPrime, addSeg )
+
+            # Support if exists.
+            if idx != len( self.toPrime ) and self.toPrime[ idx ] == addSeg:
+                self.toPrimePermanences[ idx ] += permanenceIncrement
+                self.self_record.append( "Support permanence: " + str( addSeg ) )
+
+            # Create new if doesn't exist.
+            else:
+                self.toPrime.insert( idx, addSeg )
+                self.toPrimePermanences.insert( idx, initialPermanence )
+                self.self_record.append( "New permanence: " + str( addSeg ) )
+
+        # Decay all.
+        toDelete = []
+        for index in range( len( self.toPrime ) ):
+            if self.toPrimePermanences[ index ] >= 1.0:
+                self.toPrimePermanences[ index ] = 1.0
+            else:
+                self.toPrimePermanences[ index ] -= permanenceDecay
+                if self.toPrimePermanences[ index ] <= 0.0:
+                    toDelete.insert( 0, index )
+        for toDel in toDelete:
+            del self.toPrime[ toDel ]
+            del self.toPrimePermanences[ toDel ]
+            self.self_record.append( "Deleted: " + str( toDel ) )
+
+    def GetPrimed( self ):
+    # Return the list of primed segments above threshold of 1.0.
+
+        toReturn = []
+
+        for index in range( len( self.toPrime ) ):
+            if self.toPrimePermanences[ index ] >= 1.0:
+                toReturn.append( self.toPrime[ index ] )
+
+        self.self_record.append( "GET PRIMED SEGMENTS: " + str( toReturn ) )
+        return toReturn
 
     def GetSegmentData( self ):
     # Return the data collected this time step and reset the segment data.
@@ -378,7 +432,7 @@ class Segment:
         self.activationThreshold = ( ( minActivation - maxActivation ) * np.exp( -1 * numWinners ) ) + maxActivation
         self.self_record.append( "ADJUST THRESHOLD: " + str( self.activationThreshold ) )
 
-    def DecayAndCreateBundles( self, lastActiveCols, activeCols, permanenceDecay, initialPermanence, maxBundlesPerSegment ):
+    def DecayAndCreateBundles( self, lastActiveCols, activeCols, permanenceDecay, initialPermanence, maxBundlesToAddPer ):
     # If segment doesn't have an active terminal bundle to an active column then remove an active bundle to a
     # non-active column and add this one.
     # If segment doesn't have an active incident bundle to an last-active column then remove an active bundle to a
@@ -386,90 +440,58 @@ class Segment:
     # Decay any incident synapses to non-active lastActiveCols, and terminal synapses on-active activeCols.
 
         self.self_record.append( "DECAY AND CREATE BUNDLES" )
-        self.self_record.append( str( activeCols ) )
 
-        # Terminal bundles...............
-        toAddTerminal = []
-        for pCol in activeCols:
-            if not self.terminalSynapses[ pCol ].active:
-                toAddTerminal.append( pCol )
-
-        toDeleteTerminal = []
-        for activeTer in self.activeBundlesTerminal:
-            if not BinarySearch( activeCols, activeTer ):
-                toDeleteTerminal.append( activeTer )
-
-        while len( toAddTerminal ) > 0 and len( self.activeBundlesTerminal ) < maxBundlesPerSegment:
-            toAdd = choice( toAddTerminal )
-
-            self.terminalSynapses[ toAdd ].CreateRandomSynapses( initialPermanence )
-            NoRepeatInsort( self.activeBundlesTerminal, toAdd )
-            toAddTerminal.remove( toAdd )
-
-            self.self_record.append( "Add Bundle at Column: " + str( toAdd ) )
-
-# NEED TO IMPLEMENT MAX BUNDLES TO ADD PER TIME STEP
-        while len( toAddTerminal ) > 0:
-            toAdd    = choice( toAddTerminal )
-            toDelete = choice( toDeleteTerminal )
-
-            self.terminalSynapses[ toAdd ].CreateRandomSynapses( initialPermanence )
-            NoRepeatInsort( self.activeBundlesTerminal, toAdd )
-            toAddTerminal.remove( toAdd )
-
-            self.self_record.append( "Add Bundle at Column: " + str( toAdd ) )
-            self.self_record.append( "Delete Bundle at Column: " + str( toDelete ) )
-            self.self_record.append( str( self.terminalSynapses[ toDelete ] ) )
-
-            self.terminalSynapses[ toDelete ].DeleteBundle()
-            self.activeBundlesTerminal.remove( toDelete )
-            toDeleteTerminal.remove( toDelete )
-
-        if len( toDeleteTerminal ) > 0:
-            for toDecayTer in toDeleteTerminal:
-                if not self.terminalSynapses[ toDecayTer ].SynapseDecay( permanenceDecay ):
-                    self.activeBundlesTerminal.remove( toDecayTer )
-
-        # Incident bundles...............
+        # Find the active and lastActive columns missing terminal and incident active bundles.
         toAddIncident = []
         for lCol in lastActiveCols:
             if not self.incidentSynapses[ lCol ].active:
                 toAddIncident.append( lCol )
+        toAddTerminal = []
+        for pCol in activeCols:
+            if not self.terminalSynapses[ pCol ].active:
+                toAddTerminal.append( pCol )
+        self.self_record.append( "To add Incident: " + str( toAddIncident ) )
+        self.self_record.append( "To add Terminal: " + str( toAddTerminal ) )
 
-        toDeleteIncident = []
-        for activeIns in self.activeBundlesIncident:
-            if not BinarySearch( lastActiveCols, activeIns ):
-                toDeleteIncident.append( activeIns )
+        # Randomly select maxBundlesToAddPer of these missing ones.
+        if len( toAddIncident ) > maxBundlesToAddPer:
+            newIncident = sample( toAddIncident, maxBundlesToAddPer )
+        else:
+            newIncident = toAddIncident
+        if len( toAddTerminal ) > maxBundlesToAddPer:
+            newTerminal = sample( toAddTerminal, maxBundlesToAddPer )
+        else:
+            newTerminal = toAddTerminal
 
-        while len( toAddIncident ) > 0 and len( self.activeBundlesIncident ) < maxBundlesPerSegment:
-            toAdd = choice( toAddIncident )
+        # Create new active synpase bundles for these randomly selected ones.
+        for newICol in newIncident:
+            self.incidentSynapses[ newICol ].CreateRandomSynapses( initialPermanence )
+            NoRepeatInsort( self.activeBundlesIncident, newICol )
+            self.self_record.append( "Add Incident Bundle at Column: " + str( newICol ) )
+        for newTCol in newTerminal:
+            self.terminalSynapses[ newTCol ].CreateRandomSynapses( initialPermanence )
+            NoRepeatInsort( self.activeBundlesTerminal, newTCol )
+            self.self_record.append( "Add Terminal Bundle at Column: " + str( newTCol ) )
 
-            self.incidentSynapses[ toAdd ].CreateRandomSynapses( initialPermanence )
-            NoRepeatInsort( self.activeBundlesIncident, toAdd )
-            toAddIncident.remove( toAdd )
+        # Decay all active synapse bundles by small amount.
+        # If all synapses in bundle decay to 0.0 then make bundle inactive.
+        toRemoveIncident = []
+        toRemoveTerminal = []
+        for actInc in self.activeBundlesIncident:
+            if not self.incidentSynapses[ actInc ].SynapseDecay( permanenceDecay ):
+                toRemoveIncident.append( actInc )
+        for actTer in self.activeBundlesTerminal:
+            if not self.terminalSynapses[ actTer ].SynapseDecay( permanenceDecay ):
+                toRemoveTerminal.append( actTer )
 
-            self.self_record.append( "Add Bundle at Column: " + str( toAdd ) )
-
-        while len( toAddIncident ) > 0:
-            toAdd    = choice( toAddIncident )
-            toDelete = choice( toDeleteIncident )
-
-            self.incidentSynapses[ toAdd ].CreateRandomSynapses( initialPermanence )
-            NoRepeatInsort( self.activeBundlesIncident, toAdd )
-            toAddIncident.remove( toAdd )
-
-            self.self_record.append( "Add Bundle at Column: " + str( toAdd ) )
-            self.self_record.append( "Delete Bundle at Column: " + str( toDelete ) )
-            self.self_record.append( str( self.incidentSynapses[ toDelete ] ) )
-
-            self.incidentSynapses[ toDelete ].DeleteBundle()
-            self.activeBundlesIncident.remove( toDelete )
-            toDeleteIncident.remove( toDelete )
-
-        if len( toDeleteIncident ) > 0:
-            for toDecayIns in toDeleteIncident:
-                if not self.incidentSynapses[ toDecayIns ].SynapseDecay( permanenceDecay ):
-                    self.activeBundlesIncident.remove( toDecayIns )
+        if len( toRemoveIncident ) > 0:
+            for removeInc in toRemoveIncident:
+                self.activeBundlesIncident.remove( removeInc )
+                self.self_record.append( "Remove Incident Bundle at Column: " + str( removeInc ) )
+        if len( toRemoveTerminal ) > 0:
+            for removeTer in toRemoveTerminal:
+                self.activeBundlesTerminal.remove( removeTer )
+                self.self_record.append( "Remove Terminal Bundle at Column: " + str( removeTer ) )
 
     def FindTerminalWinner( self, column ):
     # Check the terminal synapse bundle at given column for the winner and return it plus the permenence
