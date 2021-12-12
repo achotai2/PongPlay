@@ -251,19 +251,12 @@ class VectorMemory:
 
             for lActiveSeg in self.lastActiveSegs:
                 # For all lastActive segments support connection to currently active segments.
-                self.segments[ lActiveSeg ].AddToPrime( self.activeSegs, self.initialPermanence, self.permanenceIncrement, self.permanenceDecay )
+                self.segments[ lActiveSeg ].AddToPrime( self.deletedSegments, self.activeSegs, self.initialPermanence, self.permanenceIncrement, self.permanenceDecay )
 
                 # Prime all segments connected from the lastActive segments.
                 newPrimed = self.segments[ lActiveSeg ].GetPrimed()
                 for item in newPrimed:
                     NoRepeatInsort( primedSegments, item )
-
-            print( "Primed Segments: " + str( primedSegments ) )
-            print( "Last Active Segments: " + str( self.lastActiveSegs ) )
-            print( "Active Segments: " + str( self.activeSegs ) )
-
-
-
 
             for activeSegIndex in self.activeSegs:
                 # If active segments have positive synapses to non-active columns then decay them.
@@ -272,31 +265,22 @@ class VectorMemory:
                 # Adjust the segments activation threshold depending on number of winners selected.
                 self.segments[ activeSegIndex ].AdjustThreshold( self.FActivationThresholdMin, self.FActivationThresholdMax )
 
-            # For all last active columns find a winner cell on the terminal synapses of the last active segments,
-            # and the incident synapses of the presently active segments.
-            for lastActiveCol in self.lastActiveColumns:
+            # For each active column...
+            for col in self.columnSDR:
+                if len( primedSegments ) > 0:
+                    winnerCell = ( 0, 0.0 )     # ( Cell position in column, Strongest permanence value )
+                    # For all primed segments choose the winner cell on their incident synapses.
+                    for pSeg in primedSegments:
+                        winnerCellCheck = self.segments[ pSeg ].FindIncidentWinner( col )
+                        if winnerCellCheck[ 1 ] > winnerCell[ 1 ]:
+                            winnerCell = winnerCellCheck
 
-                winnerCell = ( 0, 0.0 )     # ( Cell position in column, Strongest permanence value )
-
-                # Go through all last active segments and look for winnerCell terminal on them in this column.
-                for lastActiveSegIndx in self.lastActiveSegs:
-                    winnerCellCheck = self.segments[ lastActiveSegIndx ].FindTerminalWinner( lastActiveCol )
-                    if winnerCellCheck[ 1 ] > winnerCell[ 1 ]:
-                        winnerCell = winnerCellCheck
-
-                # Go through all presently active segments and look for winnerCell incident on them in this column.
-                # If any of these segments don't have any incident synapses at this column then create random ones.
-                for activeSegIndex in self.activeSegs:
-                    winnerCellCheck = self.segments[ activeSegIndex ].FindIncidentWinner( lastActiveCol )
-                    if winnerCellCheck[ 1 ] > winnerCell[ 1 ]:
-                        winnerCell = winnerCellCheck
-
-                # Now that we've found winner support the winner, and decay the loser, on this columns synapses.
-                for lastActiveSegIndx in self.lastActiveSegs:
-                    self.segments[ lastActiveSegIndx ].SupportTerminalWinner( lastActiveCol, winnerCell[ 0 ], self.permanenceIncrement, self.permanenceDecrement )
-
-                for activeSegIndex in self.activeSegs:
-                    self.segments[ activeSegIndex ].SupportIncidentWinner( lastActiveCol, winnerCell[ 0 ], self.permanenceIncrement, self.permanenceDecrement )
+                    # Then, support this as the winner cell on all primed segments and last active segments,
+                    # and decay the loser cells.
+                    for lSeg in self.lastActiveSegs:
+                        self.segments[ lSeg ].SupportTerminalWinner( col, winnerCell[ 0 ], self.permanenceIncrement, self.permanenceDecrement )
+                    for pSeg in primedSegments:
+                        self.segments[ pSeg ].SupportIncidentWinner( col, winnerCell[ 0 ], self.permanenceIncrement, self.permanenceDecrement )
 
         # Delete segments that had all their incident or terminal synapses removed.
         self.DeleteSegments( segsToDelete )

@@ -58,7 +58,7 @@ class AgentOrange:
             synPermInactiveDec         = 0.005,
             synPermActiveInc           = 0.04,
             synPermConnected           = 0.1,
-            boostStrength              = 0.0,
+            boostStrength              = 0.5,
             seed                       = -1,
             wrapAround                 = False
         )
@@ -68,7 +68,7 @@ class AgentOrange:
             cellsPerColumn            = 4,
             numObjectCells            = 1000,
             FActivationThresholdMin   = 15,
-            FActivationThresholdMax   = 20,
+            FActivationThresholdMax   = 30,
             initialPermanence         = 0.3,
             lowerThreshold            = 0.1,
             permanenceIncrement       = 0.1,

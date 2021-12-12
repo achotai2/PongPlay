@@ -248,12 +248,22 @@ class Segment:
         return ( "< Vector: %s, \n Active: %s, Last Active: %s, Time Since Active: %s, Activation Threshold: %s \n Active Incident Columns: %s, %s, \n Active Terminal Columns: %s, %s \n Primed Connections: %s > \n"
             % (self.vector, self.active, self.lastActive, self.timeSinceActive, self.activationThreshold, len( self.activeBundlesIncident ), activeBundlesIncidentString, len( self.activeBundlesTerminal ), activeBundlesTerminalString, primedSegString ) )
 
-    def AddToPrime( self, segmentsToAdd, initialPermanence, permanenceIncrement, permanenceDecay ):
+    def AddToPrime( self, deletedSegments, segmentsToAdd, initialPermanence, permanenceIncrement, permanenceDecay ):
+    # Check deleted segments and remove any there that we have primed.
     # If segmentsToAdd isn't in self.toPrime then adds it with initialPermanence.
     # If segmentsToAdd is in then support its permanence.
     # Decay all permanences below 1.0.
 
         self.self_record.append( "ADD TO PRIME SEGMENT" )
+
+        toDelete = []
+
+        # Check for any toPrime segments in deletedSegments
+        for delSeg in deletedSegments:
+            checkIdx = IndexIfItsIn( self.toPrime, delSeg )
+
+            if checkIdx != None:
+                NoRepeatInsort( toDelete, checkIdx )
 
         for addSeg in segmentsToAdd:
             idx = bisect_left( self.toPrime, addSeg )
@@ -270,21 +280,24 @@ class Segment:
                 self.self_record.append( "New permanence: " + str( addSeg ) )
 
         # Decay all.
-        toDelete = []
         for index in range( len( self.toPrime ) ):
             if self.toPrimePermanences[ index ] >= 1.0:
                 self.toPrimePermanences[ index ] = 1.0
             else:
                 self.toPrimePermanences[ index ] -= permanenceDecay
                 if self.toPrimePermanences[ index ] <= 0.0:
-                    toDelete.insert( 0, index )
-        for toDel in toDelete:
+                    NoRepeatInsort( toDelete, index )
+
+        # Delete any stored toPrime segments 0labelled for deletion.
+        for toDel in reversed( toDelete ):
             del self.toPrime[ toDel ]
             del self.toPrimePermanences[ toDel ]
             self.self_record.append( "Deleted: " + str( toDel ) )
 
     def GetPrimed( self ):
     # Return the list of primed segments above threshold of 1.0.
+
+        for
 
         toReturn = []
 
