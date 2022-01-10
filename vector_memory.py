@@ -1,5 +1,5 @@
 from random import sample, randrange
-from cell_and_synapse import FCell, Segment, BinarySearch, IndexIfItsIn, NoRepeatInsort, RepeatInsort
+from cell_and_synapse import FCell, Segment, BinarySearch, IndexIfItsIn, NoRepeatInsort, RepeatInsort, CheckInside
 import numpy as np
 from time import time
 
@@ -38,14 +38,11 @@ class VectorMemory:
         self.burstingCols = []
 
         # Create cells in feature layer.
-        self.activeFCells      = []
-        self.lastActiveFCells  = []
         self.FCells            = []
         for i in range( columnDimensions * cellsPerColumn ):
             self.FCells.append( FCell( initialPermanence, numObjectCells, pctAllowedOCellConns ) )
 
         self.lastActiveColumns = []
-        self.predictiveFCells  = []
 
         # Create empty array for storing segments.
         self.segments        = []
@@ -54,8 +51,10 @@ class VectorMemory:
         self.deletedSegments = []
 
         # Create cells in object layer.
-        self.activeOCells        = []
-        self.lastActiveOCells    = []
+        self.activeOCells     = []
+        self.lastActiveOCells = []
+
+        self.workingMemory = []
 
 #    def ReturnCellsAndSynapses( self, cell_report_data, segment_report_data ):
 #    # Prepares details on the cell and synapse end state to print into the log file.
@@ -88,29 +87,67 @@ class VectorMemory:
 
         return segment_data
 
+    def ReturnData( self ):
+    # Return the active FCells as a list.
+
+        activeFCells = []
+        for index, fCell in enumerate( self.FCells ):
+            if fCell.active:
+                activeFCells.append( index )
+
+        return activeFCells, self.activeSegs, len( self.segments ) - len( self.deletedSegments )
+
+    def ReturnActiveSegments( self ):
+    # Return active segments as a list.
+
+        return self.activeSegs
+
     def BuildLogData( self, log_data ):
     # Adds important information to log_data for entry into log.
 
         log_data.append( "Active Columns: " + str( len( self.columnSDR ) ) + ", " + str( self.columnSDR ) )
-        log_data.append( "Active F-Cells: " + str( len( self.activeFCells ) ) + ", " + str( self.activeFCells ) )
+
+        activeFCells = []
+        for index, fCell in enumerate( self.FCells ):
+            if fCell.active:
+                activeFCells.append( index )
+        log_data.append( "Active F-Cells: " + str( len( activeFCells ) ) + ", " + str( activeFCells ) )
+
         log_data.append( "Bursting Column Pct: " + str( len( self.burstingCols ) / self.columnDimensions * 100 ) + "%, " + str( self.burstingCols ) )
 #        log_data.append( "Active O-Cells: " + str( self.activeOCells ) )
         log_data.append( "Active Segments: " + str( len( self.activeSegs ) ) + ", ActiveSegs: " + str( self.activeSegs ) )
         log_data.append( "LastActive Segs: " + str( len( self.lastActiveSegs ) ) + ", LastActiveSegs: " + str( self.lastActiveSegs ) )
-        log_data.append( "Predictive Cells: " + str( len( self.predictiveFCells ) ) + ", " + str( self.predictiveFCells ) )
+
+        predictiveFCells = []
+        for index, fCell in enumerate( self.FCells ):
+            if fCell.predictive:
+                predictiveFCells.append( index )
+        log_data.append( "Predictive Cells: " + str( len( predictiveFCells ) ) + ", " + str( predictiveFCells ) )
+
         nonDelSegments = []
         for index, seg in enumerate( self.segments ):
             if not seg.deleted:
                 nonDelSegments.append( index )
         log_data.append( "Non-Deleted Segments: " + str( len( nonDelSegments) ) + ", " + str( nonDelSegments ) )
+
         log_data.append( "Deleted Segments: " + str( len( self.deletedSegments ) ) + ", " + str( self.deletedSegments ) )
+        log_data.append( "Working Memory: " + str( self.workingMemory ) )
 
     def ActivateFCells( self ):
     # Uses activated columns and cells in predictive state to put cells in active states.
 
-        # Clean up old active cells and store old ones in lastActiveFCells.
-        self.lastActiveFCells = self.activeFCells
-        self.activeFCells = []
+        # Clean up old active and lastActive FCells.
+        for fCell in self.FCells:
+            if fCell.lastActive:
+                fCell.lastActive = False
+                fCell.lastWinner = False
+
+            if fCell.active:
+                fCell.active     = False
+                fCell.lastActive = True
+                if fCell.winner:
+                    fCell.winner     = False
+                    fCell.lastWinner = True
 
         self.burstingCols = []
 
@@ -119,15 +156,26 @@ class VectorMemory:
 
             # Check if any cells in column are predictive. If yes then make them active.
             for cell in range( col * self.FCellsPerColumn, ( col * self.FCellsPerColumn ) + self.FCellsPerColumn ):
-                if BinarySearch( self.predictiveFCells, cell ):
+                if self.FCells[ cell ].predictive:
                     columnPredictive = True
-                    self.activeFCells.append( cell )
+                    self.FCells[ cell ].active = True
+                    self.FCells[ cell ].winner = True
 
             # If none predictive then burst column, making all cells in column active.
+            # Make the one with least chosen winners the winner cell.
             if not columnPredictive:
                 self.burstingCols.append( col )
+
+                minWinnersNum = -1
+                minWinnersIdx = 0
                 for cell in range( col * self.FCellsPerColumn, ( col * self.FCellsPerColumn ) + self.FCellsPerColumn ):
-                    NoRepeatInsort( self.activeFCells, cell )
+                    self.FCells[ cell ].active = True
+
+                    if minWinnersNum == -1 or self.FCells[ cell ].numWinners < minWinnersNum:
+                        minWinnersNum = self.FCells[ cell ].numWinners
+                        minWinnersIdx = cell
+
+                self.FCells[ minWinnersIdx ].winner = True
 
     def ActivateOCells( self ):
     # Use the active FCells to activate the OCells.
@@ -138,10 +186,11 @@ class VectorMemory:
 
         oCellActivationLevel = [ 0 ] * self.numObjectCells
         # Use active FCells to decide on new active OCells.
-        for actFCell in self.activeFCells:
-            for index, oCell in enumerate( self.FCells[ actFCell ].OCellConnections ):
-                if self.FCells[ actFCell ].OCellPermanences[ index ] > self.lowerThreshold:
-                    oCellActivationLevel[ oCell ] += 1
+        for index, fCell in enumerate( self.FCells ):
+            if fCell.active:
+                for index, oCell in enumerate( fCell.OCellConnections ):
+                    if fCell.OCellPermanences[ index ] > self.lowerThreshold:
+                        oCellActivationLevel[ oCell ] += 1
 
 #        potentialActiveOcells = []
 #        for index, oCell in enumerate( oCellActivationLevel ):
@@ -169,8 +218,6 @@ class VectorMemory:
     def DeleteSegments( self, segsToDeleteList ):
     # Deletes all segments in segsToDeleteList.
 
-#        for index in sorted( segsToDeleteList, reverse = True ):
-#            del self.segments[ index ]
         for index in segsToDeleteList:
             self.segments[ index ].DeleteSegment()
 
@@ -188,7 +235,24 @@ class VectorMemory:
     def CreateSegment( self, vector ):
     # Create a new Segment, terminal on these active columns, incident on last active columns.
 
-        newSegment = Segment( self.columnSDR, self.lastActiveColumns, self.initialPermanence, self.columnDimensions, self.FCellsPerColumn, vector, self.initialPosVariance, self.FActivationThresholdMin )
+# THE PROBLEM WITH BELOW IS IF MORE THAN ONE CELL IN COLUMN IS ACTIVE (BECAUSE WE HYPOTHESIZE MULTIPLE FEATURES)
+# THEN IT WILL CHOOSE THE ONE WITH THE LEAST TIMES WINNER TO BUILD SYNAPSE TO. BUT THIS WILL CROSS OVER FEATURE
+# LINES AND MIX FEATURES. NOT WHAT WE WANT TO DO...
+
+        terminalCellWinners = []
+        for tCol in self.columnSDR:
+            for cCell in range( tCol * self.FCellsPerColumn, ( tCol * self.FCellsPerColumn ) + self.FCellsPerColumn ):
+                if self.FCells[ cCell ].winner:
+                    terminalCellWinners.append( cCell )
+
+        incidentCellWinners = []
+        for iCol in self.lastActiveColumns:
+            checkCells = []
+            for cCell in range( iCol * self.FCellsPerColumn, ( iCol * self.FCellsPerColumn ) + self.FCellsPerColumn ):
+                if self.FCells[ cCell ].lastWinner:
+                    incidentCellWinners.append( cCell )
+
+        newSegment = Segment( terminalCellWinners, incidentCellWinners, self.initialPermanence, self.columnDimensions, self.FCellsPerColumn, vector, self.initialPosVariance, self.FActivationThresholdMin )
         self.segments.append( newSegment )
         self.activeSegs.append( len( self.segments ) - 1 )
 
@@ -202,7 +266,11 @@ class VectorMemory:
         if len( self.segments ) > 0 and len( self.activeSegs ) > 0:
             for activeSegment in self.activeSegs:
 
-                if self.segments[ activeSegment ].CheckIfPredicting( self.activeFCells, self.FCellsPerColumn, lastVector, self.lowerThreshold ):
+                activeFCellsBool = []
+                for fCell in self.FCells:
+                    activeFCellsBool.append( fCell.active )
+
+                if self.segments[ activeSegment ].CheckIfPredicting( activeFCellsBool, self.FCellsPerColumn, lastVector, self.lowerThreshold ):
                     NoRepeatInsort( validActiveSeg, activeSegment )
                     self.segments[ activeSegment ].timeSinceActive = 0
 
@@ -244,43 +312,43 @@ class VectorMemory:
         self.SegmentActivation( lastVector )
 
         # If there is more than one segment active check if they are idential, if so delete one.
-        self.CheckIfSegsIdentical( segsToDelete )
+#        self.CheckIfSegsIdentical( segsToDelete )
 
         # For every active and lastActive segment...
         if len( self.activeSegs ) > 0 and len( self.lastActiveSegs ) > 0:
 
-            for lActiveSeg in self.lastActiveSegs:
-                # For all lastActive segments support connection to currently active segments.
-                self.segments[ lActiveSeg ].AddToPrime( self.deletedSegments, self.activeSegs, self.initialPermanence, self.permanenceIncrement, self.permanenceDecay )
-
-                # Prime all segments connected from the lastActive segments.
-                newPrimed = self.segments[ lActiveSeg ].GetPrimed()
-                for item in newPrimed:
-                    NoRepeatInsort( primedSegments, item )
+#            for lActiveSeg in self.lastActiveSegs:
+#                # For all lastActive segments support connection to currently active segments.
+#                self.segments[ lActiveSeg ].AddToPrime( self.deletedSegments, self.activeSegs, self.initialPermanence, self.permanenceIncrement, self.permanenceDecay )
+#
+#                # Prime all segments connected from the lastActive segments.
+#                newPrimed = self.segments[ lActiveSeg ].GetPrimed()
+#                for item in newPrimed:
+#                    NoRepeatInsort( primedSegments, item )
 
             for activeSegIndex in self.activeSegs:
                 # If active segments have positive synapses to non-active columns then decay them.
                 # If active segments do not have terminal or incident synapses to active columns create them.
-                self.segments[ activeSegIndex ].DecayAndCreateBundles( self.lastActiveColumns, self.columnSDR, self.permanenceDecay, self.initialPermanence, self.maxBundlesToAddPer )
+                self.segments[ activeSegIndex ].DecayAndCreateBundles( self.lastActiveColumns, self.columnSDR, self.permanenceDecay, self.initialPermanence, self.maxBundlesToAddPer, self.maxBundlesPerSegment )
                 # Adjust the segments activation threshold depending on number of winners selected.
-                self.segments[ activeSegIndex ].AdjustThreshold( self.FActivationThresholdMin, self.FActivationThresholdMax )
+#                self.segments[ activeSegIndex ].AdjustThreshold( self.FActivationThresholdMin, self.FActivationThresholdMax )
 
             # For each active column...
-            for col in self.columnSDR:
-                if len( primedSegments ) > 0:
-                    winnerCell = ( 0, 0.0 )     # ( Cell position in column, Strongest permanence value )
-                    # For all primed segments choose the winner cell on their incident synapses.
-                    for pSeg in primedSegments:
-                        winnerCellCheck = self.segments[ pSeg ].FindIncidentWinner( col )
-                        if winnerCellCheck[ 1 ] > winnerCell[ 1 ]:
-                            winnerCell = winnerCellCheck
+#            for col in self.columnSDR:
+#                if len( primedSegments ) > 0:
+#                    winnerCell = ( 0, 0.0 )     # ( Cell position in column, Strongest permanence value )
+#                    # For all primed segments choose the winner cell on their incident synapses.
+#                    for pSeg in primedSegments:
+#                        winnerCellCheck = self.segments[ pSeg ].FindIncidentWinner( col )
+#                        if winnerCellCheck[ 1 ] > winnerCell[ 1 ]:
+#                            winnerCell = winnerCellCheck
 
                     # Then, support this as the winner cell on all primed segments and last active segments,
                     # and decay the loser cells.
-                    for lSeg in self.lastActiveSegs:
-                        self.segments[ lSeg ].SupportTerminalWinner( col, winnerCell[ 0 ], self.permanenceIncrement, self.permanenceDecrement )
-                    for pSeg in primedSegments:
-                        self.segments[ pSeg ].SupportIncidentWinner( col, winnerCell[ 0 ], self.permanenceIncrement, self.permanenceDecrement )
+#                    for lSeg in self.lastActiveSegs:
+#                        self.segments[ lSeg ].SupportTerminalWinner( col, winnerCell[ 0 ], self.permanenceIncrement, self.permanenceDecrement )
+#                    for pSeg in primedSegments:
+#                        self.segments[ pSeg ].SupportIncidentWinner( col, winnerCell[ 0 ], self.permanenceIncrement, self.permanenceDecrement )
 
         # Delete segments that had all their incident or terminal synapses removed.
         self.DeleteSegments( segsToDelete )
@@ -306,7 +374,10 @@ class VectorMemory:
     # Clear old predicted FCells and generate new predicted FCells.
 
         # Clean up old predictive cells and segments.
-        self.predictiveFCells = []
+        for fCell in self.FCells:
+            if fCell.predictive:
+                fCell.predictive = False
+
         self.activeSegs       = []
         self.lastActiveSegs   = []
 
@@ -314,6 +385,7 @@ class VectorMemory:
         for index in range( len( self.segments ) ):
 
             if not self.segments[ index ].deleted:
+
                 # Make previously active segments lastActive (used in segment learning).
                 if self.segments[ index ].active == True:
                     self.segments[ index ].lastActive = True
@@ -321,18 +393,67 @@ class VectorMemory:
                 else:
                     self.segments[ index ].lastActive = False
 
-                if self.segments[ index ].CheckIfPredicted( self.activeFCells, self.FCellsPerColumn, vector, self.lowerThreshold ):
+                activeFCellsBool = []
+                for fCell in self.FCells:
+                    activeFCellsBool.append( fCell.active )
 
-                        self.segments[ index ].active = True
-                        self.activeSegs.append( index )
+                if self.segments[ index ].CheckIfPredicted( activeFCellsBool, self.FCellsPerColumn, vector, self.lowerThreshold ):
 
-                        terminalFCellList = self.segments[ index ].ReturnTerminalFCells( self.FCellsPerColumn, self.lowerThreshold )
+                    self.segments[ index ].active = True
+                    self.activeSegs.append( index )
 
-                        for cell in terminalFCellList:
-                            NoRepeatInsort( self.predictiveFCells, cell )
+                    terminalFCellList = self.segments[ index ].ReturnTerminalFCells( self.FCellsPerColumn, self.lowerThreshold )
+
+                    for cell in terminalFCellList:
+                        self.FCells[ cell ].predictive = True
 
                 else:
                     self.segments[ index ].active = False
+
+        # If no segments are predicting cells then look into working memory if this vector is predicted there.
+        if len( self.activeSegs ) <= 0 and len( self.workingMemory ) > 0:
+            for item in self.workingMemory:
+                if CheckInside( item[ 1 ], vector, self.initialPosVariance ):
+                    for cell in item[ 0 ]:
+                        self.FCells[ cell ].predictive = True
+
+    def UpdateWorkingMemory( self, vector ):
+    # Use the vector to update all vectors stored in workingMemory items, and add timeStep. If any
+    # item is above threshold time steps then remove it.
+    # Add the new active Fcells to working memory.
+
+        if len( self.workingMemory ) > 0:
+
+            workingMemoryToDelete = []
+
+            for index in range( len( self.workingMemory ) ):
+                # Update vector.
+                self.workingMemory[ index ][ 1 ][ 0 ] += vector[ 0 ]
+                self.workingMemory[ index ][ 1 ][ 1 ] += vector[ 1 ]
+
+# WILL HAVE TO WORK ON WORKING MEMORY TO MAKE IT MORE PRECISE.
+                if self.workingMemory[ index ][ 1 ][ 0 ] == 0 and self.workingMemory[ index ][ 1 ][ 1 ] == 0:
+                    workingMemoryToDelete.insert( 0, index )
+
+                # Update time step.
+                self.workingMemory[ index ][ 2 ] += 1
+
+                if self.workingMemory[ index ][ 2 ] > self.segmentDecay:
+                    if workingMemoryToDelete[ 0 ] != index:
+                        workingMemoryToDelete.insert( 0, index )
+
+            # Delete items whose timeStep is above threshold.
+            if len( workingMemoryToDelete ) > 0:
+                for toDel in workingMemoryToDelete:
+                    del self.workingMemory[ toDel ]
+
+        # Add active winner cells to working memory, with zero vector (since we're there), and no time steps,
+        # if it doesn't exist.
+        winnerCells = []
+        for index, cell in enumerate( self.FCells ):
+            if cell.winner:
+                winnerCells.append( index )
+        self.workingMemory.append( [ winnerCells, [ 0, 0 ], 0 ] )
 
     def Compute( self, columnSDR, lastVector, newVector ):
     # Compute the action of vector memory, and learn on the synapses.
@@ -346,6 +467,9 @@ class VectorMemory:
 
         # Clear old active cells and get new ones active cells for this time step.
         self.ActivateFCells()
+
+        # Update working memory vectors.
+        self.UpdateWorkingMemory( lastVector )
 
         # Use the active FCells to tell us what OCells to activate.
         self.ActivateOCells()

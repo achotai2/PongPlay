@@ -67,20 +67,20 @@ class AgentOrange:
             columnDimensions          = 2048,
             cellsPerColumn            = 4,
             numObjectCells            = 1000,
-            FActivationThresholdMin   = 15,
-            FActivationThresholdMax   = 30,
+            FActivationThresholdMin   = 30,
+            FActivationThresholdMax   = 35,
             initialPermanence         = 0.3,
             lowerThreshold            = 0.1,
             permanenceIncrement       = 0.1,
             permanenceDecrement       = 0.05,
             permanenceDecay           = 0.001,
-            segmentDecay              = 200,
+            segmentDecay              = 10000,
             initialPosVariance        = 10,
             OActivationThreshold      = 13,
             ObjectRepActivaton        = 25,
             maxNewFToFSynapses        = 128,
             maxSegmentsPerCell        = 32,
-            maxBundlesPerSegment      = 50,
+            maxBundlesPerSegment      = 100,
             maxBundlesToAddPer        = 5,
             equalityThreshold         = 30,
             pctAllowedOCellConns      = 0.8
@@ -119,6 +119,11 @@ class AgentOrange:
         self.vp.BuildLogData( log_data )
 
         return log_data
+
+    def GetReportData( self ):
+    # Get the active cells from vp
+
+        return self.vp.ReturnData()
 
     def PrintBitRep( self, log_data ):
     # Prints out the bit represention.

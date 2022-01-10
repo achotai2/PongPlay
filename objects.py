@@ -2,6 +2,7 @@ import numpy
 import atexit
 import datetime
 import os
+import matplotlib.pyplot as plt
 
 from agent_objects import AgentOrange
 
@@ -59,6 +60,13 @@ log_file.write( "Program Start Time: " + str( start_date_and_time_string ) )
 log_file.write( "\n" )
 log_file.close()
 
+position_data        = [ 0, [], [] ] * 4       # top left, top right, bottom left, bottom right. [ total count, [ cells ], [ count ] ]
+vector_data          = [ 0, [], [] ] * 16      # All the vectors. [ total count, [ segments ], [ count ] ]
+graphY1NumActiveCells = []
+graphY2NumActiveSegs  = []
+graphY3NumValidSegs   = []
+graphXTimeSteps       = []
+
 def WriteDataToFiles( timeStep ):
 # Go through all returned segment data and write it to separate segment files.
 
@@ -92,6 +100,27 @@ def WriteDataToFiles( timeStep ):
             segment_report_file.write( "\n" )
         segment_report_file.close()
 
+def AccumulateReportData( timeStep, organVector ):
+# Accumulate the active cells and segments and input into report data.
+
+    activeCells, activeSegments, numValidSegments  = Agent1.GetReportData()
+
+    if sensePosX == 100 and sensePosY == 100:
+        posIndex = 0
+    elif sensePosX == 100 and sensePosY == -100:
+        posIndex = 1
+    elif sensePosX == -100 and sensePosY == 100:
+        posIndex = 2
+    elif sensePosX == -100 and sensePosY == -100:
+        posIndex = 3
+
+    # Data for graph.
+    # x-axis and y-axis values
+    graphY1NumActiveCells.append( len( activeCells ) )
+    graphY2NumActiveSegs.append( len( activeSegments ) )
+    graphY3NumValidSegs.append( numValidSegments )
+    graphXTimeSteps.append( timeStep )
+
 def exit_handler():
 # Upon program exit appends end time and closes log file.
 
@@ -115,6 +144,22 @@ def exit_handler():
 #        cell_report_file.write( "\n" )
 #    cell_report_file.close()
 
+    # --------- Plot the graph. ----------------
+    # plotting the points
+    plt.plot( graphXTimeSteps, graphY1NumActiveCells, label = "# Active F-Cells" )
+    plt.plot( graphXTimeSteps, graphY2NumActiveSegs, label = "# Active Segments" )
+    plt.plot( graphXTimeSteps, graphY3NumValidSegs, label = "# Valid Segments" )
+    # naming the x axis
+    plt.xlabel('Time Steps')
+    # naming the y axis
+    plt.ylabel('# of Active')
+    # giving a title to my graph
+    plt.title('# F-Cells and Segments Over Time')
+    plt.legend()
+    # function to show the plot
+    plt.savefig( "Logs/" + start_date_and_time_string + "/Plot_Data.png" )
+    plt.show()
+
 atexit.register( exit_handler )
 
 # Main program loop-------------------------------------------------------------
@@ -124,18 +169,20 @@ while True:
 
     timeStep += 1
 
-#    if int( timeStep / 100 ) % 3 == 1:
-#        boxColour = 2
-#        box.color( "green" )
-#    elif int( timeStep / 100 ) % 3 == 2:
-#        boxColour = 3
-#        box.color( "blue" )
-#    elif int( timeStep / 100 ) % 3 == 0:
-#        boxColour = 1
-#        box.color( "red" )
+    if int( timeStep / 300 ) % 3 == 1:
+        boxColour = 2
+        box.color( "green" )
+    elif int( timeStep / 300 ) % 3 == 2:
+        boxColour = 3
+        box.color( "blue" )
+    elif int( timeStep / 300 ) % 3 == 0:
+        boxColour = 1
+        box.color( "red" )
 
     # Run agent brain and get motor vector.
     organVector = Agent1.Brain( objCenterX, objCenterY, objWidth, objHeight, boxColour, sensePosX, sensePosY )
+
+    AccumulateReportData( timeStep, organVector )
 
     # Move agents sense organ accordingt to returned vector.
     sensePosX += organVector[ 0 ]

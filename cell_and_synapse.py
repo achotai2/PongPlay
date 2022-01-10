@@ -52,6 +52,19 @@ def RepeatInsort( list, val ):
         list.insert( idx, val )
         return idx
 
+def CheckInside( vector1, vector2, checkRange ):
+# Checks if given position is inside range.
+
+    if len( vector1 ) != len( vector2 ):
+        print( "Error: Vectors not of same length." )
+        exit()
+
+    for i in range( len( vector1 ) ):
+        if vector1[ i ] > vector2[ i ] + checkRange or vector1[ i ] < vector2[ i ] - checkRange:
+            return False
+
+    return True
+
 class SynapseBundle:
 
     def __init__( self, cellsInBundle, initialPermanence ):
@@ -110,8 +123,6 @@ class SynapseBundle:
                 self.synapses[ index ] = 0.0
             else:
                 self.active = True
-
-        return self.active
 
     def getWinnerCell( self ):
     # Return the cell with the highest synapse and its permanence value, as a tuple.
@@ -172,7 +183,7 @@ class SynapseBundle:
 
 class Segment:
 
-    def __init__( self, terminalColumnsList, incidentColumnsList, initialPermanence, columnDimensions, cellsPerColumn, vector, posRange, minActivation ):
+    def __init__( self, terminalCellsList, incidentCellsList, initialPermanence, columnDimensions, cellsPerColumn, vector, posRange, minActivation ):
     # Create a new OSegment, which connects multiple OCells to multiple FCells in same column. One will be chosen
     # as winner eventually.
     # Within this create an FSegment, with multiple synapses to FCells from these FCells.
@@ -182,32 +193,16 @@ class Segment:
         self.active              = False      # True means it's predictive, and above threshold terminal cells fired.
         self.lastActive          = False      # True means it was active last time step.
         self.timeSinceActive     = 0          # Time steps since this segment was active last.
-        self.numWinners          = 0          # The number of synapse bundles that have selected a winner.
         self.activationThreshold = minActivation
         self.toPrime             = []         # The segments that appear right after this one that might become primed.
         self.toPrimePermanences  = []         # The permanence connections to the toPrime segments.
 
         # FSegment portion--------
-        self.terminalSynapses = []
-        for tCol in range( columnDimensions ):
-            if BinarySearch( terminalColumnsList, tCol ):
-                newSynapseBundle = SynapseBundle( cellsPerColumn, initialPermanence )
-            else:
-                newSynapseBundle = SynapseBundle( cellsPerColumn, 0.0 )
+        self.terminalSynapses    = terminalCellsList.copy()
+        self.terminalPermanences = [ initialPermanence ] * len( terminalCellsList )
 
-            self.terminalSynapses.append( newSynapseBundle )
-
-        self.incidentSynapses = []
-        for iCol in range( columnDimensions ):
-            if BinarySearch( incidentColumnsList, iCol ):
-                newSynapseBundle = SynapseBundle( cellsPerColumn, initialPermanence )
-            else:
-                newSynapseBundle = SynapseBundle( cellsPerColumn, 0.0 )
-
-            self.incidentSynapses.append( newSynapseBundle )
-
-        self.activeBundlesTerminal = terminalColumnsList
-        self.activeBundlesIncident = incidentColumnsList
+        self.incidentSynapses    = incidentCellsList.copy()
+        self.incidentPermanences = [ initialPermanence ] * len( incidentCellsList )
 
         # Vector portion---------
         self.dimensions = len( vector )      # Number of dimensions vector positions will be in.
@@ -233,20 +228,12 @@ class Segment:
     def AddStateToRecord( self ):
     # Adds details of current state, as a string, to record to be printed upon program completion.
 
-        activeBundlesTerminalString = []
-        for actBTer in self.activeBundlesTerminal:
-            activeBundlesTerminalString.append( ( actBTer, self.terminalSynapses[ actBTer ].synapses ) )
-
-        activeBundlesIncidentString = []
-        for actBIns in self.activeBundlesIncident:
-            activeBundlesIncidentString.append( ( actBIns, self.incidentSynapses[ actBIns ].synapses ) )
-
         primedSegString = []
         for index, pSeg in enumerate( self.toPrime ):
             primedSegString.append( ( pSeg, self.toPrimePermanences[ index ] ) )
 
-        return ( "< Vector: %s, \n Active: %s, Last Active: %s, Time Since Active: %s, Activation Threshold: %s \n Active Incident Columns: %s, %s, \n Active Terminal Columns: %s, %s \n Primed Connections: %s > \n"
-            % (self.vector, self.active, self.lastActive, self.timeSinceActive, self.activationThreshold, len( self.activeBundlesIncident ), activeBundlesIncidentString, len( self.activeBundlesTerminal ), activeBundlesTerminalString, primedSegString ) )
+        return ( "< Vector: %s, \n Active: %s, Last Active: %s, Time Since Active: %s, Activation Threshold: %s \n Active Incident Synapses: %s, %s, \n Active Terminal Synapses: %s, %s \n Primed Connections: %s > \n"
+            % (self.vector, self.active, self.lastActive, self.timeSinceActive, self.activationThreshold, self.incidentSynapses, self.incidentPermanences, self.terminalSynapses, self.terminalPermanences, primedSegString ) )
 
     def AddToPrime( self, deletedSegments, segmentsToAdd, initialPermanence, permanenceIncrement, permanenceDecay ):
     # Check deleted segments and remove any there that we have primed.
@@ -296,8 +283,6 @@ class Segment:
 
     def GetPrimed( self ):
     # Return the list of primed segments above threshold of 1.0.
-
-        for
 
         toReturn = []
 
@@ -377,18 +362,14 @@ class Segment:
         passingCells = []
         failingCells = []
 
-        for FCell in FCellList:
-            col  = int( FCell / cellsPerColumn )
-            cell = int( FCell % cellsPerColumn )
-
-            if synapsesToCheck[ col ].active and synapsesToCheck[ col ].ReturnTrueIfActive( cell, lowerThreshold ):
-                passingCells.append( ( col, cell ) )
+        for synapse in synapsesToCheck:
+            if FCellList[ synapse ]:
                 overlap += 1
-
+                passingCells.append( synapse )
             else:
-                failingCells.append( ( col, cell ) )
+                failingCells.append( synapse )
 
-        self.self_record.append( "FCell List: " + str( FCellList ) )
+#        self.self_record.append( "FCell List: " + str( FCellList ) )
         self.self_record.append( "Overlap Score: " + str( overlap ) )
         self.self_record.append( "Passing Overlapping (Col, Cell): " + str( passingCells ) )
         self.self_record.append( "Not Overlapping (Col, Cell): " + str( failingCells ) )
@@ -402,6 +383,8 @@ class Segment:
     def CheckIfPredicted( self, activeFCells, cellsPerColumn, vector, lowerThreshold ):
     # Checks if this segments is predicting by checking incident overlap and vector.
 
+        self.self_record.append( "CHECK IF PREDICTED" )
+
         if self.CheckOverlap( activeFCells, cellsPerColumn, self.incidentSynapses, lowerThreshold ) and self.Inside( vector ):
             return True
         else:
@@ -409,6 +392,8 @@ class Segment:
 
     def CheckIfPredicting( self, activeFCells, cellsPerColumn, vector, lowerThreshold ):
     # Checks if this segments is still predicted by checking terminal overlap and vector.
+
+        self.self_record.append( "CHECK IF PREDICTING" )
 
         if self.CheckOverlap( activeFCells, cellsPerColumn, self.terminalSynapses, lowerThreshold ) and self.Inside( vector ):
             return True
@@ -418,17 +403,7 @@ class Segment:
     def ReturnTerminalFCells( self, cellsPerColumn, lowerThreshold ):
     # Return the active terminal cells for this segment in a list format.
 
-        terminalFCellList = []
-
-        for synapseBundleIndex in range( len( self.terminalSynapses ) ):
-            if self.terminalSynapses[ synapseBundleIndex ].active:
-
-                cellList = self.terminalSynapses[ synapseBundleIndex ].ReturnActiveCells( lowerThreshold )
-                for cellIndex in cellList:
-
-                    terminalFCellList.append( cellIndex + ( synapseBundleIndex * cellsPerColumn ) )
-
-        return terminalFCellList
+        return self.terminalSynapses
 
     def AdjustThreshold( self, minActivation, maxActivation ):
     # Check the number of bundles that have selected winner. Use this to adjust activationThreshold.
@@ -445,7 +420,7 @@ class Segment:
         self.activationThreshold = ( ( minActivation - maxActivation ) * np.exp( -1 * numWinners ) ) + maxActivation
         self.self_record.append( "ADJUST THRESHOLD: " + str( self.activationThreshold ) )
 
-    def DecayAndCreateBundles( self, lastActiveCols, activeCols, permanenceDecay, initialPermanence, maxBundlesToAddPer ):
+    def DecayAndCreateBundles( self, lastActiveCols, activeCols, permanenceDecay, initialPermanence, maxBundlesToAddPer, maxBundlesPerSegment ):
     # If segment doesn't have an active terminal bundle to an active column then remove an active bundle to a
     # non-active column and add this one.
     # If segment doesn't have an active incident bundle to an last-active column then remove an active bundle to a
@@ -466,45 +441,39 @@ class Segment:
         self.self_record.append( "To add Incident: " + str( toAddIncident ) )
         self.self_record.append( "To add Terminal: " + str( toAddTerminal ) )
 
-        # Randomly select maxBundlesToAddPer of these missing ones.
-        if len( toAddIncident ) > maxBundlesToAddPer:
-            newIncident = sample( toAddIncident, maxBundlesToAddPer )
-        else:
-            newIncident = toAddIncident
-        if len( toAddTerminal ) > maxBundlesToAddPer:
-            newTerminal = sample( toAddTerminal, maxBundlesToAddPer )
-        else:
-            newTerminal = toAddTerminal
+        # Count the number of active bundles.
+        incidentActiveCount = 0
+        terminalActiveCount = 0
+        for iBun in self.incidentSynapses:
+            if iBun.active:
+                incidentActiveCount += 1
+        for tBun in self.terminalSynapses:
+            if tBun.active:
+                terminalActiveCount += 1
+        if maxBundlesPerSegment - incidentActiveCount < 0 or  maxBundlesPerSegment - terminalActiveCount < 0:
+            print( "Segment has more active bundles than allowed." )
+            exit()
+
+        # Randomly select bundles to add of these missing ones.
+        incidentBundlesToAdd = min( maxBundlesToAddPer, maxBundlesPerSegment - incidentActiveCount, len( toAddIncident ) )
+        newIncident = sample( toAddIncident, incidentBundlesToAdd )
+        terminalBundlesToAdd = min( maxBundlesToAddPer, maxBundlesPerSegment - terminalActiveCount, len( toAddTerminal ) )
+        newTerminal = sample( toAddTerminal, terminalBundlesToAdd )
 
         # Create new active synpase bundles for these randomly selected ones.
         for newICol in newIncident:
             self.incidentSynapses[ newICol ].CreateRandomSynapses( initialPermanence )
-            NoRepeatInsort( self.activeBundlesIncident, newICol )
             self.self_record.append( "Add Incident Bundle at Column: " + str( newICol ) )
         for newTCol in newTerminal:
             self.terminalSynapses[ newTCol ].CreateRandomSynapses( initialPermanence )
-            NoRepeatInsort( self.activeBundlesTerminal, newTCol )
             self.self_record.append( "Add Terminal Bundle at Column: " + str( newTCol ) )
 
         # Decay all active synapse bundles by small amount.
         # If all synapses in bundle decay to 0.0 then make bundle inactive.
-        toRemoveIncident = []
-        toRemoveTerminal = []
-        for actInc in self.activeBundlesIncident:
-            if not self.incidentSynapses[ actInc ].SynapseDecay( permanenceDecay ):
-                toRemoveIncident.append( actInc )
-        for actTer in self.activeBundlesTerminal:
-            if not self.terminalSynapses[ actTer ].SynapseDecay( permanenceDecay ):
-                toRemoveTerminal.append( actTer )
-
-        if len( toRemoveIncident ) > 0:
-            for removeInc in toRemoveIncident:
-                self.activeBundlesIncident.remove( removeInc )
-                self.self_record.append( "Remove Incident Bundle at Column: " + str( removeInc ) )
-        if len( toRemoveTerminal ) > 0:
-            for removeTer in toRemoveTerminal:
-                self.activeBundlesTerminal.remove( removeTer )
-                self.self_record.append( "Remove Terminal Bundle at Column: " + str( removeTer ) )
+        for iBun in range( len( self.incidentSynapses ) ):
+            self.incidentSynapses[ iBun ].SynapseDecay( permanenceDecay )
+        for tBun in range( len( self.terminalSynapses ) ):
+            self.terminalSynapses[ tBun ].SynapseDecay( permanenceDecay )
 
     def FindTerminalWinner( self, column ):
     # Check the terminal synapse bundle at given column for the winner and return it plus the permenence
@@ -564,10 +533,20 @@ class Segment:
         else:
             self.self_record.append( "Synapse bundle at this location doesn't have an active synapse." )
 
+# -----------------------------------------------------------------------------------
+
 class FCell:
 
     def __init__( self, initialPermanence, numOCells, pctAllowedOCellConns ):
     # Create a new feature level cell with synapses to OCells.
+
+        self.active     = False
+        self.lastActive = False
+        self.predictive = False
+        self.winner     = False
+        self.lastWinner = False
+
+        self.numWinners = 0
 
         # Create synapse connections to OCells.
         numberOCellConns = int( pctAllowedOCellConns * numOCells )
