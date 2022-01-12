@@ -3,6 +3,7 @@ import atexit
 import datetime
 import os
 import matplotlib.pyplot as plt
+from bisect import bisect_left
 
 from agent_objects import AgentOrange
 
@@ -53,15 +54,13 @@ start_date_and_time_string = str( datetime.datetime.now() )
 os.mkdir( "./Logs/" + start_date_and_time_string )
 
 log_file_name    =  "Logs/" + start_date_and_time_string + "/Log" + ".txt"
-#cell_report_file_name =  "Logs/" + start_date_and_time_string + "-Cell-Report" + ".txt"
-
 log_file = open( log_file_name, 'a' )
 log_file.write( "Program Start Time: " + str( start_date_and_time_string ) )
 log_file.write( "\n" )
 log_file.close()
 
-position_data        = [ 0, [], [] ] * 4       # top left, top right, bottom left, bottom right. [ total count, [ cells ], [ count ] ]
-vector_data          = [ 0, [], [] ] * 16      # All the vectors. [ total count, [ segments ], [ count ] ]
+cellData              = []
+stateData             = []
 graphY1NumActiveCells = []
 graphY2NumActiveSegs  = []
 graphY3NumValidSegs   = []
@@ -100,22 +99,49 @@ def WriteDataToFiles( timeStep ):
             segment_report_file.write( "\n" )
         segment_report_file.close()
 
-def AccumulateReportData( timeStep, organVector ):
+def AccumulateReportData( timeStep, boxColour ):
 # Accumulate the active cells and segments and input into report data.
 
-    activeCells, activeSegments, numValidSegments  = Agent1.GetReportData()
+    activeCellsBool, activeSegments, numValidSegments = Agent1.GetReportData()
 
-    if sensePosX == 100 and sensePosY == 100:
-        posIndex = 0
-    elif sensePosX == 100 and sensePosY == -100:
-        posIndex = 1
-    elif sensePosX == -100 and sensePosY == 100:
-        posIndex = 2
-    elif sensePosX == -100 and sensePosY == -100:
-        posIndex = 3
+    # A list of indices of all active cells.
+    activeCells = []
+    for index, cell in enumerate( activeCellsBool ):
+        if cell:
+            activeCells.append( index )
+
+    # Gather state data.
+    stateIndex = 0
+    currentState  = 0
+    while stateIndex < len( stateData ):
+        if stateData[ stateIndex ][ 1 ] == sensePosX and stateData[ stateIndex ][ 2 ] == sensePosY and stateData[ stateIndex ][ 3 ] == boxColour:
+            stateData[ stateIndex ][ 0 ] += 1
+            break
+        stateIndex += 1
+    if stateIndex == len( stateData ):
+        stateData.append( [ 1, sensePosX, sensePosY, boxColour ] )
+    currentState = stateIndex
+
+    # Find active cell identification data.
+    for i, aCell in enumerate( activeCellsBool ):
+        if i < len( cellData ):
+            if aCell:
+                cellData[ i ][ 1 ] += 1
+                entryIndex = 2
+                while entryIndex < len( cellData[ i ] ):
+                    if cellData[ i ][ entryIndex ][ 0 ] == currentState:
+                        cellData[ i ][ entryIndex ][ 1 ] += 1
+                        break
+                    entryIndex += 1
+                if entryIndex == len( cellData[ i ] ):
+                    cellData[ i ].append( [ currentState, 1 ] )
+        else:
+            cellData.append( [ i, 0 ] )
+            if aCell:
+                cellData[ -1 ][ 1 ] += 1
+                cellData[ -1 ].append( [ currentState, 1 ] )
 
     # Data for graph.
-    # x-axis and y-axis values
     graphY1NumActiveCells.append( len( activeCells ) )
     graphY2NumActiveSegs.append( len( activeSegments ) )
     graphY3NumValidSegs.append( numValidSegments )
@@ -130,19 +156,25 @@ def exit_handler():
     log_file.write( "\n" + "Program End Time: " + str( datetime.datetime.now() ) )
     log_file.close()
 
-#    cell_report_data = []
-#    cell_report_data.append( start_date_and_time_string )
-#    cell_report_data.append( "-------------------------------------------------------" )
-
-#    Agent1.ReturnEndState( cell_report_data )
-
-#    cell_report_data.append( "\n" + "Program End Time: " + str( datetime.datetime.now() ) )
-
-#    cell_report_file = open( cell_report_file_name, 'w' )
-#    for line in cell_report_data:
-#        cell_report_file.write( line )
-#        cell_report_file.write( "\n" )
-#    cell_report_file.close()
+    cell_report_data = []
+    cell_report_data.append( start_date_and_time_string )
+    cell_report_data.append( "-------------------------------------------------------" )
+    cell_report_data.append( "- \t Cell ID \t # Times Active \t ( State active in, % times active ) -" )
+    cellData.sort( key = lambda cellData: cellData[ 1 ], reverse = True )
+    for cell in cellData:
+        state_data_str = ""
+        entryIndex = 2
+        while entryIndex < len( cell ):
+            state_data_str += "( " + str( [ stateData[ cell[ entryIndex ][ 0 ] ][ i ] for i in range( 1, len( stateData[ cell[ entryIndex ][ 0 ] ] ) ) ] ) + ", " + str( int( cell[ entryIndex ][ 1 ] / stateData[ cell[ entryIndex ][ 0 ] ][ 0 ] * 100 ) ) + "% ), "
+            entryIndex += 1
+        cell_report_data.append( "\t" + str( cell[ 0 ] ) + "\t\t\t" + str( cell[ 1 ] ) + "\t\t" + state_data_str )
+    cell_report_data.append( "\n" + "Program End Time: " + str( datetime.datetime.now() ) )
+    cell_report_file_name =  "Logs/" + start_date_and_time_string + "/Cell-Report" + ".txt"
+    cell_report_file = open( cell_report_file_name, 'w' )
+    for line in cell_report_data:
+        cell_report_file.write( line )
+        cell_report_file.write( "\n" )
+    cell_report_file.close()
 
     # --------- Plot the graph. ----------------
     # plotting the points
@@ -182,7 +214,8 @@ while True:
     # Run agent brain and get motor vector.
     organVector = Agent1.Brain( objCenterX, objCenterY, objWidth, objHeight, boxColour, sensePosX, sensePosY )
 
-    AccumulateReportData( timeStep, organVector )
+    # Accumulate the active cells and segments and input into report data.
+    AccumulateReportData( timeStep, boxColour )
 
     # Move agents sense organ accordingt to returned vector.
     sensePosX += organVector[ 0 ]

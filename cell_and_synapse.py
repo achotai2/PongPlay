@@ -410,70 +410,73 @@ class Segment:
 
         numWinners = 0
 
-        for terB in self.terminalSynapses:
-            if terB.chosenWinner:
+        for terB in self.terminalPermanences:
+            if terB == 1.0:
                 numWinners += 1
-        for incB in self.incidentSynapses:
-            if incB.chosenWinner:
+        for incB in self.incidentPermanences:
+            if incB == 1.0:
                 numWinners += 1
 
         self.activationThreshold = ( ( minActivation - maxActivation ) * np.exp( -1 * numWinners ) ) + maxActivation
         self.self_record.append( "ADJUST THRESHOLD: " + str( self.activationThreshold ) )
 
-    def DecayAndCreateBundles( self, lastActiveCols, activeCols, permanenceDecay, initialPermanence, maxBundlesToAddPer, maxBundlesPerSegment ):
-    # If segment doesn't have an active terminal bundle to an active column then remove an active bundle to a
-    # non-active column and add this one.
-    # If segment doesn't have an active incident bundle to an last-active column then remove an active bundle to a
-    # non-active column and add this one.
-    # Decay any incident synapses to non-active lastActiveCols, and terminal synapses on-active activeCols.
+    def DecayAndCreate( self, lastActiveCells, permanenceIncrement, permanenceDecrement, initialPermanence, maxBundlesToAddPer, maxBundlesPerSegment, cellsPerColumn ):
+    # Increase synapse strength to lastActive cells that already have synapses.
+    # Decrease synapse strength to not lastActive cells that have synapses.
+    # Build new synapses to lastActive cells that don't have synapses, but only one cell per column can have synapses.
+    # Delete synapses whose permanences have decayed to zero.
 
-        self.self_record.append( "DECAY AND CREATE BUNDLES" )
+        self.self_record.append( "DECAY AND CREATE" )
 
-        # Find the active and lastActive columns missing terminal and incident active bundles.
-        toAddIncident = []
-        for lCol in lastActiveCols:
-            if not self.incidentSynapses[ lCol ].active:
-                toAddIncident.append( lCol )
-        toAddTerminal = []
-        for pCol in activeCols:
-            if not self.terminalSynapses[ pCol ].active:
-                toAddTerminal.append( pCol )
-        self.self_record.append( "To add Incident: " + str( toAddIncident ) )
-        self.self_record.append( "To add Terminal: " + str( toAddTerminal ) )
+        synapseToDelete = []
 
-        # Count the number of active bundles.
-        incidentActiveCount = 0
-        terminalActiveCount = 0
-        for iBun in self.incidentSynapses:
-            if iBun.active:
-                incidentActiveCount += 1
-        for tBun in self.terminalSynapses:
-            if tBun.active:
-                terminalActiveCount += 1
-        if maxBundlesPerSegment - incidentActiveCount < 0 or  maxBundlesPerSegment - terminalActiveCount < 0:
-            print( "Segment has more active bundles than allowed." )
-            exit()
+        synIndex = 0
+        for cellIndex, lCellActive in enumerate( lastActiveCells ):
 
-        # Randomly select bundles to add of these missing ones.
-        incidentBundlesToAdd = min( maxBundlesToAddPer, maxBundlesPerSegment - incidentActiveCount, len( toAddIncident ) )
-        newIncident = sample( toAddIncident, incidentBundlesToAdd )
-        terminalBundlesToAdd = min( maxBundlesToAddPer, maxBundlesPerSegment - terminalActiveCount, len( toAddTerminal ) )
-        newTerminal = sample( toAddTerminal, terminalBundlesToAdd )
+            # Increase synapse strength to lastActive cells that already have synapses.
+            if lCellActive and synIndex < len( self.incidentSynapses ) and self.incidentSynapses[ synIndex ] == cellIndex:
+                self.incidentPermanences[ synIndex ] += permanenceIncrement
+                if self.incidentPermanences[ synIndex ] > 1.0:
+                    self.incidentPermanences[ synIndex ] = 1.0
+                self.self_record.append( "Increase permanence, " + str( cellIndex ) + ", to: " + str( self.incidentPermanences[ synIndex ] ) )
+                synIndex += 1
 
-        # Create new active synpase bundles for these randomly selected ones.
-        for newICol in newIncident:
-            self.incidentSynapses[ newICol ].CreateRandomSynapses( initialPermanence )
-            self.self_record.append( "Add Incident Bundle at Column: " + str( newICol ) )
-        for newTCol in newTerminal:
-            self.terminalSynapses[ newTCol ].CreateRandomSynapses( initialPermanence )
-            self.self_record.append( "Add Terminal Bundle at Column: " + str( newTCol ) )
+            # Decrease synapse strength to not lastActive cells that have synapses.
+            elif not lCellActive and synIndex < len( self.incidentSynapses ) and self.incidentSynapses[ synIndex ] == cellIndex:
+                self.incidentPermanences[ synIndex ] -= permanenceDecrement
+                if self.incidentPermanences[ synIndex ] < 0.0:
+                    synapseToDelete.insert( 0, synIndex )
+                self.self_record.append( "Decrease permanence, " + str( cellIndex ) + ", to: " + str( self.incidentPermanences[ synIndex ] ) )
+                synIndex += 1
 
-        # Decay all active synapse bundles by small amount.
-        # If all synapses in bundle decay to 0.0 then make bundle inactive.
-        for iBun in range( len( self.incidentSynapses ) ):
-            self.incidentSynapses[ iBun ].SynapseDecay( permanenceDecay )
-        for tBun in range( len( self.terminalSynapses ) ):
-            self.terminalSynapses[ tBun ].SynapseDecay( permanenceDecay )
+            # Build new synapses to lastActive cells that don't have synapses.
+            # Only one cell per column can have synapses, so check for this first.
+            elif lCellActive:
+                thisColumn = int( cellIndex / cellsPerColumn )
+                addNewSynapse = False
+
+                if synIndex == 0:
+                    if int( self.incidentSynapses[ synIndex ] / cellsPerColumn ) != thisColumn:
+                        addNewSynapse = True
+
+                elif synIndex < len( self.incidentSynapses ):
+                    if int( self.incidentSynapses[ synIndex ] / cellsPerColumn ) != thisColumn and int( self.incidentSynapses[ synIndex - 1 ] / cellsPerColumn ) != thisColumn:
+                        addNewSynapse = True
+
+                elif synIndex == len( self.incidentSynapses ):
+                    if int( self.incidentSynapses[ synIndex - 1 ] / cellsPerColumn ) != thisColumn:
+                        addNewSynapse = True
+
+                if addNewSynapse:
+                    self.incidentSynapses.insert( synIndex, cellIndex )
+                    self.incidentPermanences.insert( synIndex, initialPermanence )
+                    self.self_record.append( "New synapse at: " + str( cellIndex ) )
+                    synIndex += 1
+
+        # Delete synapses whose permanences have decayed to zero.
+        for toDel in synapseToDelete:
+            del self.incidentSynapses[ toDel ]
+            del self.incidentPermanences[ toDel ]
 
     def FindTerminalWinner( self, column ):
     # Check the terminal synapse bundle at given column for the winner and return it plus the permenence

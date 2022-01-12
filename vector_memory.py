@@ -91,9 +91,8 @@ class VectorMemory:
     # Return the active FCells as a list.
 
         activeFCells = []
-        for index, fCell in enumerate( self.FCells ):
-            if fCell.active:
-                activeFCells.append( index )
+        for fCell in self.FCells:
+            activeFCells.append( fCell.active )
 
         return activeFCells, self.activeSegs, len( self.segments ) - len( self.deletedSegments )
 
@@ -327,11 +326,18 @@ class VectorMemory:
 #                    NoRepeatInsort( primedSegments, item )
 
             for activeSegIndex in self.activeSegs:
+
+                # Gather the lastActive FCells in a bool list.
+                lastActiveFCells = []
+                for lCell in self.FCells:
+                    lastActiveFCells.append( lCell.lastActive )
+
                 # If active segments have positive synapses to non-active columns then decay them.
                 # If active segments do not have terminal or incident synapses to active columns create them.
-                self.segments[ activeSegIndex ].DecayAndCreateBundles( self.lastActiveColumns, self.columnSDR, self.permanenceDecay, self.initialPermanence, self.maxBundlesToAddPer, self.maxBundlesPerSegment )
+                self.segments[ activeSegIndex ].DecayAndCreate( lastActiveFCells, self.permanenceIncrement, self.permanenceDecrement, self.initialPermanence, self.maxBundlesToAddPer, self.maxBundlesPerSegment, self.FCellsPerColumn )
+
                 # Adjust the segments activation threshold depending on number of winners selected.
-#                self.segments[ activeSegIndex ].AdjustThreshold( self.FActivationThresholdMin, self.FActivationThresholdMax )
+                self.segments[ activeSegIndex ].AdjustThreshold( self.FActivationThresholdMin, self.FActivationThresholdMax )
 
             # For each active column...
 #            for col in self.columnSDR:
