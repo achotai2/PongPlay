@@ -78,9 +78,9 @@ class AgentOrange:
             initialPosVariance        = 10,
             OActivationThreshold      = 13,
             ObjectRepActivaton        = 25,
-            maxNewFToFSynapses        = 5,
             maxSegmentsPerCell        = 32,
-            maxSynapsesPerSegment     = 100,
+            maxSynapsesPerSegment     = 50,
+            maxSynapsesToAddPer       = 5,
             equalityThreshold         = 30,
             pctAllowedOCellConns      = 0.8
         )
@@ -97,6 +97,11 @@ class AgentOrange:
         self.localBitRep  = []
         self.centerX      = 0
         self.centerY      = 0
+
+    def ReturnSegmentState( self, timeStep ):
+    # Checks on every segment in self.vp and returns its state in a list.
+
+        return self.vp.ReturnSegmentData( timeStep )
 
     def GetLogData( self ):
     # Get the local log data and return it.
