@@ -62,8 +62,6 @@ log_file.close()
 cellData              = []
 stateData             = []
 graphY1NumActiveCells = []
-graphY2NumActiveSegs  = []
-graphY3NumValidSegs   = []
 graphXTimeSteps       = []
 
 def WriteDataToFiles( timeStep ):
@@ -85,24 +83,10 @@ def WriteDataToFiles( timeStep ):
         log_file.write( "\n" )
     log_file.close()
 
-    # Write segment data to individual reports.
-# CAREFUL WITH COMMENTING OUT THIS FUNCTION AS EACH SEGMENTS LOCAL DATA STORAGE ONLY REFRESHED HERE.
-    segment_report_data = Agent1.ReturnSegmentState( timeStep )
-
-    for index, segment_data in enumerate( segment_report_data ):
-
-        segment_report_file_name =  "Logs/" + start_date_and_time_string + "/Segment_" + str( index ) + ".txt"
-        segment_report_file = open( segment_report_file_name, 'a' )
-
-        for line in segment_data:
-            segment_report_file.write( line )
-            segment_report_file.write( "\n" )
-        segment_report_file.close()
-
 def AccumulateReportData( timeStep, boxColour ):
 # Accumulate the active cells and segments and input into report data.
 
-    activeCellsBool, activeSegments, numValidSegments = Agent1.GetReportData()
+    activeCellsBool = Agent1.GetReportData()
 
     # A list of indices of all active cells.
     activeCells = []
@@ -143,8 +127,6 @@ def AccumulateReportData( timeStep, boxColour ):
 
     # Data for graph.
     graphY1NumActiveCells.append( len( activeCells ) )
-    graphY2NumActiveSegs.append( len( activeSegments ) )
-    graphY3NumValidSegs.append( numValidSegments )
     graphXTimeSteps.append( timeStep )
 
 def exit_handler():
@@ -179,14 +161,12 @@ def exit_handler():
     # --------- Plot the graph. ----------------
     # plotting the points
     plt.plot( graphXTimeSteps, graphY1NumActiveCells, label = "# Active F-Cells" )
-    plt.plot( graphXTimeSteps, graphY2NumActiveSegs, label = "# Active Segments" )
-    plt.plot( graphXTimeSteps, graphY3NumValidSegs, label = "# Valid Segments" )
     # naming the x axis
     plt.xlabel('Time Steps')
     # naming the y axis
     plt.ylabel('# of Active')
     # giving a title to my graph
-    plt.title('# F-Cells and Segments Over Time')
+    plt.title('# F-Cells Over Time')
     plt.legend()
     # function to show the plot
     plt.savefig( "Logs/" + start_date_and_time_string + "/Plot_Data.png" )

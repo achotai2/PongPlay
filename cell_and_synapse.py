@@ -65,142 +65,22 @@ def CheckInside( vector1, vector2, checkRange ):
 
     return True
 
-class SynapseBundle:
-
-    def __init__( self, cellsInBundle, initialPermanence ):
-    # Create a new synapse bundle to all cells in a particular column, with dead synapses if initialPermanence = 0.0.
-    # Otherwise bundle is set to active, and permanences are random.
-
-        self.chosenWinner = False
-
-        if initialPermanence == 0.0:
-            self.active   = False                       # Active if any cell in bundle has positive permanence.
-            self.synapses = [ 0.0 ] * cellsInBundle     # All permanence values initially set to zero.
-
-        elif initialPermanence > 0.0:
-            self.active = True
-            self.synapses = []
-            for index in range( cellsInBundle ):
-                self.synapses.append( uniform( initialPermanence - ( initialPermanence / 2 ), initialPermanence ) )
-
-        else:
-            print( "initialPermanence must be positive or 0.0, not negative." )
-            exit()
-
-#    def __eq__( self, other ):
-#    # Runs if compared SynapseBundle1 == SynapseBundle2. Compares the permanence strength of each synapse in bundle.
-#
-#        if len( self.synapses ) == len( other.synapses ) and self.active and other.active:
-#
-#            for i in range( len( self.synapses ) ):
-#                if self.synapses[ i ] != other.synapses[ i ]:
-#                    return False
-#
-#            return True
-#
-#        else:
-#            return False
-
-    def CreateRandomSynapses( self, initialPermanence ):
-    # Set bundle to active and create random synapse permanences.
-
-        self.active = True
-
-        for index in range( len( self.synapses ) ):
-            self.synapses[index] = uniform( initialPermanence - ( initialPermanence / 2 ), initialPermanence )
-
-    def SynapseDecay( self, permanenceDecay ):
-    # Decay all synapses in bundle by amount.
-    # If synapse is at 1.0 then it is locked in, don't decay it.
-
-        self.active = False
-
-        for index in range( len( self.synapses ) ):
-            if self.synapses[ index ] < 1.0:
-                self.synapses[ index ] -= permanenceDecay
-
-            if self.synapses[ index ] <= 0.0:
-                self.synapses[ index ] = 0.0
-            else:
-                self.active = True
-
-    def getWinnerCell( self ):
-    # Return the cell with the highest synapse and its permanence value, as a tuple.
-
-        winnerCell       = 0
-        winnerPermanence = 0.0
-
-        for index in range( len( self.synapses ) ):
-            if self.synapses[ index ] >= winnerPermanence:
-                winnerCell       = index
-                winnerPermanence = self.synapses[ index ]
-
-        return ( winnerCell, winnerPermanence )
-
-    def SupportWinner( self, winnerCell, permanenceIncrement, permanenceDecrement ):
-    # Support the winner cells permanences, and decay the loser cells.
-
-        for index in range( len( self.synapses ) ):
-            if index == winnerCell:
-                if self.synapses[ index ] < 1.0 - permanenceIncrement:
-                    self.synapses[ index ] += permanenceIncrement
-                else:
-                    self.synapses[ index ] = 1.0
-                    self.chosenWinner = True
-            else:
-                if self.synapses[ index ] > 0.0 + permanenceDecrement:
-                    self.synapses[ index ] -= permanenceDecrement
-                else:
-                    self.synapses[ index ] = 0.0
-
-    def ReturnActiveCells( self, lowerThreshold ):
-    # Return a list of the active cells.
-
-        cellList = []
-
-        for index in range( len( self.synapses ) ):
-            if self.synapses[ index ] > lowerThreshold:
-                cellList.append( index )
-
-        return cellList
-
-    def ReturnTrueIfActive( self, index, lowerThreshold ):
-    # Returns true if cell index is active.
-
-        if self.synapses[ index ] > lowerThreshold:
-            return True
-        else:
-            return False
-
-    def DeleteBundle( self ):
-    # Sets all permanences in this bundle to 0.0 and the bundle to not active.
-
-        self.active       = False
-        self.chosenWinner = False
-
-        for index in range( len( self.synapses ) ):
-            self.synapses[ index ] = 0.0
+#-------------------------------------------------------------------------------
 
 class Segment:
 
-    def __init__( self, terminalCellsList, incidentCellsList, initialPermanence, columnDimensions, cellsPerColumn, vector, posRange, minActivation ):
+    def __init__( self, incidentCellsList, initialPermanence, vector, posRange, minActivation ):
     # Create a new OSegment, which connects multiple OCells to multiple FCells in same column. One will be chosen
     # as winner eventually.
     # Within this create an FSegment, with multiple synapses to FCells from these FCells.
     # Also a vector which will be used to activate segment.
 
-        self.deleted             = False      # If segment is deleted keep it, but don't look at it until the end report.
-        self.active              = False      # True means it's predictive, and above threshold terminal cells fired.
+        self.active              = True      # True means it's predictive, and above threshold terminal cells fired.
         self.lastActive          = False      # True means it was active last time step.
         self.timeSinceActive     = 0          # Time steps since this segment was active last.
         self.activationThreshold = minActivation
-        self.toPrime             = []         # The segments that appear right after this one that might become primed.
-        self.toPrimePermanences  = []         # The permanence connections to the toPrime segments.
 
         # FSegment portion--------
-        self.terminalSynapses    = terminalCellsList.copy()
-        self.terminalPermanences = [ initialPermanence ] * len( terminalCellsList )
-
         self.incidentSynapses    = incidentCellsList.copy()
         self.incidentPermanences = [ initialPermanence ] * len( incidentCellsList )
 
@@ -211,20 +91,6 @@ class Segment:
             posI = ( vector[ i ] - posRange / 2, vector[ i ] + posRange / 2 )
             self.vector.append( posI )
 
-        self.self_record = []
-
-#    def __repr__( self ):
-#    # Returns string properties of the segment.
-#
-#        self.self_record.append( "-Program Completion-" )
-#        self.self_record.append( self.AddStateToRecord() )
-#
-#        final_string = ""
-#        for line in self.self_record:
-#            final_string = final_string + line + "\n"
-#
-#        return final_string
-
     def AddStateToRecord( self ):
     # Adds details of current state, as a string, to record to be printed upon program completion.
 
@@ -234,84 +100,6 @@ class Segment:
 
         return ( "< Vector: %s, \n Active: %s, Last Active: %s, Time Since Active: %s, Activation Threshold: %s \n Active Incident Synapses: %s, %s, \n Active Terminal Synapses: %s, %s \n Primed Connections: %s > \n"
             % (self.vector, self.active, self.lastActive, self.timeSinceActive, self.activationThreshold, self.incidentSynapses, self.incidentPermanences, self.terminalSynapses, self.terminalPermanences, primedSegString ) )
-
-    def AddToPrime( self, deletedSegments, segmentsToAdd, initialPermanence, permanenceIncrement, permanenceDecay ):
-    # Check deleted segments and remove any there that we have primed.
-    # If segmentsToAdd isn't in self.toPrime then adds it with initialPermanence.
-    # If segmentsToAdd is in then support its permanence.
-    # Decay all permanences below 1.0.
-
-        self.self_record.append( "ADD TO PRIME SEGMENT" )
-
-        toDelete = []
-
-        # Check for any toPrime segments in deletedSegments
-        for delSeg in deletedSegments:
-            checkIdx = IndexIfItsIn( self.toPrime, delSeg )
-
-            if checkIdx != None:
-                NoRepeatInsort( toDelete, checkIdx )
-
-        for addSeg in segmentsToAdd:
-            idx = bisect_left( self.toPrime, addSeg )
-
-            # Support if exists.
-            if idx != len( self.toPrime ) and self.toPrime[ idx ] == addSeg:
-                self.toPrimePermanences[ idx ] += permanenceIncrement
-                self.self_record.append( "Support permanence: " + str( addSeg ) )
-
-            # Create new if doesn't exist.
-            else:
-                self.toPrime.insert( idx, addSeg )
-                self.toPrimePermanences.insert( idx, initialPermanence )
-                self.self_record.append( "New permanence: " + str( addSeg ) )
-
-        # Decay all.
-        for index in range( len( self.toPrime ) ):
-            if self.toPrimePermanences[ index ] >= 1.0:
-                self.toPrimePermanences[ index ] = 1.0
-            else:
-                self.toPrimePermanences[ index ] -= permanenceDecay
-                if self.toPrimePermanences[ index ] <= 0.0:
-                    NoRepeatInsort( toDelete, index )
-
-        # Delete any stored toPrime segments 0labelled for deletion.
-        for toDel in reversed( toDelete ):
-            del self.toPrime[ toDel ]
-            del self.toPrimePermanences[ toDel ]
-            self.self_record.append( "Deleted: " + str( toDel ) )
-
-    def GetPrimed( self ):
-    # Return the list of primed segments above threshold of 1.0.
-
-        toReturn = []
-
-        for index in range( len( self.toPrime ) ):
-            if self.toPrimePermanences[ index ] >= 1.0:
-                toReturn.append( self.toPrime[ index ] )
-
-        self.self_record.append( "GET PRIMED SEGMENTS: " + str( toReturn ) )
-        return toReturn
-
-    def GetSegmentData( self ):
-    # Return the data collected this time step and reset the segment data.
-
-        if not self.deleted:
-            self.self_record.append( self.AddStateToRecord() )
-
-        toReturn = self.self_record.copy()
-
-        self.self_record = []
-
-        return toReturn
-
-    def DeleteSegment( self ):
-    # Deletes the segment.
-
-        self.deleted = True
-        self.active  = False
-
-        self.self_record.append( "DELETED" )
 
     def Equality( self, other, equalityThreshold, lowerThreshold ):
     # Runs the following comparison of equality: segment1 == segment2.
@@ -336,10 +124,8 @@ class Segment:
                             terminalEquality += 1
 
         if incidentEquality >= equalityThreshold and terminalEquality >= equalityThreshold:
-            self.self_record.append( "EQUALITY True" )
             return True
         else:
-            self.self_record.append( "EQUALITY False" )
             return False
 
     def Inside( self, vector ):
@@ -347,98 +133,51 @@ class Segment:
 
         for i in range( self.dimensions ):
             if vector[ i ] < self.vector[ i ][ 0 ] or vector[ i ] > self.vector[ i ][ 1 ]:
-                self.self_record.append( "INSIDE False" )
                 return False
 
-        self.self_record.append( "INSIDE True" )
         return True
 
     def CheckOverlap( self, FCellList, cellsPerColumn, synapsesToCheck, lowerThreshold ):
     # Check FColumnList for overlap with incidentSynapses. If overlap is above threshold return True, otherwise False.
 
-        self.self_record.append( "CHECK OVERLAP" )
-
         overlap = 0
-        passingCells = []
-        failingCells = []
 
         for synapse in synapsesToCheck:
             if FCellList[ synapse ]:
                 overlap += 1
-                passingCells.append( synapse )
-            else:
-                failingCells.append( synapse )
-
-#        self.self_record.append( "FCell List: " + str( FCellList ) )
-        self.self_record.append( "Overlap Score: " + str( overlap ) )
-        self.self_record.append( "Passing Overlapping (Col, Cell): " + str( passingCells ) )
-        self.self_record.append( "Not Overlapping (Col, Cell): " + str( failingCells ) )
-        self.self_record.append( "Activation Threshold: " + str( self.activationThreshold ) )
 
         if overlap >= self.activationThreshold:
             return True
         else:
             return False
 
-    def CheckIfPredicted( self, activeFCells, cellsPerColumn, vector, lowerThreshold ):
-    # Checks if this segments is predicting by checking incident overlap and vector.
-
-        self.self_record.append( "CHECK IF PREDICTED" )
-
-        if self.CheckOverlap( activeFCells, cellsPerColumn, self.incidentSynapses, lowerThreshold ) and self.Inside( vector ):
-            return True
-        else:
-            return False
-
-    def CheckIfPredicting( self, activeFCells, cellsPerColumn, vector, lowerThreshold ):
-    # Checks if this segments is still predicted by checking terminal overlap and vector.
-
-        self.self_record.append( "CHECK IF PREDICTING" )
-
-        if self.CheckOverlap( activeFCells, cellsPerColumn, self.terminalSynapses, lowerThreshold ) and self.Inside( vector ):
-            return True
-        else:
-            return False
-
-    def ReturnTerminalFCells( self, cellsPerColumn, lowerThreshold ):
-    # Return the active terminal cells for this segment in a list format.
-
-        return self.terminalSynapses
-
     def AdjustThreshold( self, minActivation, maxActivation ):
     # Check the number of bundles that have selected winner. Use this to adjust activationThreshold.
 
         numWinners = 0
 
-        for terB in self.terminalPermanences:
-            if terB == 1.0:
-                numWinners += 1
         for incB in self.incidentPermanences:
             if incB == 1.0:
                 numWinners += 1
 
         self.activationThreshold = ( ( minActivation - maxActivation ) * np.exp( -1 * numWinners ) ) + maxActivation
-        self.self_record.append( "ADJUST THRESHOLD: " + str( self.activationThreshold ) )
 
-    def DecayAndCreate( self, lastActiveCells, permanenceIncrement, permanenceDecrement, initialPermanence, maxBundlesToAddPer, maxBundlesPerSegment, cellsPerColumn ):
+    def DecayAndCreate( self, lastActiveCellsBool, permanenceIncrement, permanenceDecrement, initialPermanence, maxBundlesToAddPer, maxBundlesPerSegment, cellsPerColumn ):
     # Increase synapse strength to lastActive cells that already have synapses.
     # Decrease synapse strength to not lastActive cells that have synapses.
     # Build new synapses to lastActive cells that don't have synapses, but only one cell per column can have synapses.
     # Delete synapses whose permanences have decayed to zero.
 
-        self.self_record.append( "DECAY AND CREATE" )
-
         synapseToDelete = []
 
         synIndex = 0
-        for cellIndex, lCellActive in enumerate( lastActiveCells ):
+        for cellIndex, lCellActive in enumerate( lastActiveCellsBool ):
 
             # Increase synapse strength to lastActive cells that already have synapses.
             if lCellActive and synIndex < len( self.incidentSynapses ) and self.incidentSynapses[ synIndex ] == cellIndex:
                 self.incidentPermanences[ synIndex ] += permanenceIncrement
                 if self.incidentPermanences[ synIndex ] > 1.0:
                     self.incidentPermanences[ synIndex ] = 1.0
-                self.self_record.append( "Increase permanence, " + str( cellIndex ) + ", to: " + str( self.incidentPermanences[ synIndex ] ) )
                 synIndex += 1
 
             # Decrease synapse strength to not lastActive cells that have synapses.
@@ -446,7 +185,6 @@ class Segment:
                 self.incidentPermanences[ synIndex ] -= permanenceDecrement
                 if self.incidentPermanences[ synIndex ] < 0.0:
                     synapseToDelete.insert( 0, synIndex )
-                self.self_record.append( "Decrease permanence, " + str( cellIndex ) + ", to: " + str( self.incidentPermanences[ synIndex ] ) )
                 synIndex += 1
 
             # Build new synapses to lastActive cells that don't have synapses.
@@ -470,7 +208,6 @@ class Segment:
                 if addNewSynapse:
                     self.incidentSynapses.insert( synIndex, cellIndex )
                     self.incidentPermanences.insert( synIndex, initialPermanence )
-                    self.self_record.append( "New synapse at: " + str( cellIndex ) )
                     synIndex += 1
 
         # Delete synapses whose permanences have decayed to zero.
@@ -478,78 +215,23 @@ class Segment:
             del self.incidentSynapses[ toDel ]
             del self.incidentPermanences[ toDel ]
 
-    def FindTerminalWinner( self, column ):
-    # Check the terminal synapse bundle at given column for the winner and return it plus the permenence
-    # value as a tuple.
-
-        winnerCell = self.terminalSynapses[ column ].getWinnerCell()
-
-        self.self_record.append( "FIND TERMINAL WINNER" )
-        self.self_record.append( "Column: " + str( column ) + " winnerCell: " + str( winnerCell ) )
-        self.self_record.append( str( ( column, self.terminalSynapses[ column ].synapses ) ) )
-
-        if not self.terminalSynapses[ column ].active:
-            self.self_record.append( "Terminal bundle isn't active." )
-
-        return winnerCell
-
-    def FindIncidentWinner( self, column ):
-    # Check the terminal synapse bundle at given column for the winner and return it plus the permenence
-    # value as a tuple.
-
-        winnerCell = self.incidentSynapses[ column ].getWinnerCell()
-
-        self.self_record.append( "FIND INCIDENT WINNER" )
-        self.self_record.append( "Column: " + str( column ) + " winnerCell: " + str( winnerCell ) )
-        self.self_record.append( str( ( column, self.incidentSynapses[ column ].synapses ) ) )
-
-        if not self.incidentSynapses[ column ].active:
-            self.self_record.append( "Incident bundle isn't active." )
-
-        return winnerCell
-
-    def SupportTerminalWinner( self, column, winnerCell, permanenceIncrement, permanenceDecrement ):
-    # For the given synapse bundle, support the winnerCell by permanenceIncrement,
-    #  and decay the losers by permanenceDecrement.
-
-        self.self_record.append( "SUPPORT TERMINAL WINNER" )
-        self.self_record.append( "Column: " + str( column ) + " winnerCell: " + str( winnerCell ) )
-        self.self_record.append( str( ( column, self.terminalSynapses[ column ].synapses ) ) )
-
-        if self.terminalSynapses[ column ].active:
-            self.terminalSynapses[ column ].SupportWinner( winnerCell, permanenceIncrement, permanenceDecrement )
-
-        else:
-            self.self_record.append( "Synapse bundle at this location doesn't have an active synapse." )
-
-    def SupportIncidentWinner( self, column, winnerCell, permanenceIncrement, permanenceDecrement ):
-    # For the given synapse bundle, support the winnerCell by permanenceIncrement,
-    #  and decay the losers by permanenceDecrement.
-
-        self.self_record.append( "SUPPORT INCIDENT WINNER" )
-        self.self_record.append( "Column: " + str( column ) + " winnerCell: " + str( winnerCell ) )
-        self.self_record.append( str( ( column, self.incidentSynapses[ column ].synapses ) ) )
-
-        if self.incidentSynapses[ column ].active:
-            self.incidentSynapses[ column ].SupportWinner( winnerCell, permanenceIncrement, permanenceDecrement )
-
-        else:
-            self.self_record.append( "Synapse bundle at this location doesn't have an active synapse." )
-
-# -----------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 class FCell:
 
-    def __init__( self, initialPermanence, numOCells, pctAllowedOCellConns ):
+    def __init__( self, initialPermanence, numOCells, pctAllowedOCellConns, segmentDecay ):
     # Create a new feature level cell with synapses to OCells.
 
         self.active     = False
         self.lastActive = False
-        self.predictive = False
+        self.predicted  = False
         self.winner     = False
         self.lastWinner = False
 
         self.numWinners = 0
+
+        self.segments   = []
+        self.segmentDecay = segmentDecay
 
         # Create synapse connections to OCells.
         numberOCellConns = int( pctAllowedOCellConns * numOCells )
@@ -583,3 +265,110 @@ class FCell:
 
                 if self.OCellPermanences[ index ] < 0.0:
                     self.OCellPermanences[ index ] = 0.0
+
+    def NumSegments( self ):
+    # Return the number of segments terminating on this cell.
+
+        return len( self.segments )
+
+    def IncrementSegTime( self, segsToDeleteList ):
+    # Increment every OSegments timeSinceActive.
+
+        for segIndx in range( len( self.segments ) ):
+            self.segments[ segIndx ].timeSinceActive += 1
+
+            if self.segments[ segIndx ].timeSinceActive > self.segmentDecay:
+                NoRepeatInsort( segsToDeleteList, segIndx )
+
+    def DeleteSegments( self, segsToDeleteList ):
+    # Deletes all segments in segsToDeleteList.
+
+        for index in reversed( segsToDeleteList ):
+            del self.segments[ index ]
+
+    def UpdateSegmentActivity( self ):
+    # Make every segment that was active into lastActive, and every lastActive into not active.
+
+        for segment in self.segments:
+            if segment.lastActive:
+                segment.lastActive = False
+
+            if segment.active:
+                segment.active     = False
+                segment.lastActive = True
+
+    def CheckIfPredicted( self, activeFCells, cellsPerColumn, vector, lowerThreshold ):
+    # Checks if this cell has any segments predicting by checking incident overlap and vector.
+    # If so then activate that segment and make cell predicted, otherwise not predicted.
+
+# SHOULD IMPROVE THIS BY CHECKING IF MULTIPLE SEGMENTS ARE ACTIVE WE ONLY WANT THE ONE WITH THE MOST OVERLAP MAYBE.
+# MAYBE COMBINE THE TWO INTO ONE, OR DELETE ONE, IF ACTIVE TOGETHER OFTEN.
+        anySegments = False
+
+        for segment in self.segments:
+            if segment.Inside( vector ) and segment.CheckOverlap( activeFCells, cellsPerColumn, segment.incidentSynapses, lowerThreshold ):
+                segment.active = True
+                anySegments    = True
+
+        if anySegments:
+            self.predicted = True
+        else:
+            self.predicted = False
+
+    def CheckIfSegsIdentical( self, segsToDelete ):
+    # Compares all active segments to see if they have identical vectors and active synapse bundles.
+    # If any do then delete one of them.
+
+        if len( self.activeSegs ) > 1:
+            for index1 in range( len( self.activeSegs ) - 1 ):
+                for index2 in range( index1 + 1, len( self.activeSegs ) ):
+                    actSeg1 = self.activeSegs[ index1 ]
+                    actSeg2 = self.activeSegs[ index2 ]
+
+                    if actSeg1 != actSeg2:
+                        if self.segments[ actSeg1 ].Equality( self.segments[ actSeg2 ], self.equalityThreshold, self.lowerThreshold ):
+                            NoRepeatInsort( segsToDelete, actSeg2 )
+                    else:
+                        print( "Error in CheckIfSegsIdentical()")
+                        exit()
+
+    def CreateSegment( self, vector, incidentCellWinners, initialPermanence, initialPosVariance, FActivationThresholdMin  ):
+    # Create a new Segment, terminal on these active columns, incident on last active columns.
+
+# THE PROBLEM WITH BELOW IS IF MORE THAN ONE CELL IN COLUMN IS ACTIVE (BECAUSE WE HYPOTHESIZE MULTIPLE FEATURES)
+# THEN IT WILL CHOOSE THE ONE WITH THE LEAST TIMES WINNER TO BUILD SYNAPSE TO. BUT THIS WILL CROSS OVER FEATURE
+# LINES AND MIX FEATURES. NOT WHAT WE WANT TO DO...
+
+        newSegment = Segment( incidentCellWinners, initialPermanence, vector, initialPosVariance, FActivationThresholdMin )
+        self.segments.append( newSegment )
+
+    def SegmentLearning( self, lastVector, lastActiveFCellsBool, incidentCellWinners, initialPermanence, initialPosVariance,
+        FActivationThresholdMin, FActivationThresholdMax, permanenceIncrement, permanenceDecrement,
+        maxNewFToFSynapses, maxSynapsesPerSegment, cellsPerColumn ):
+    # Perform learning on segments, and create new ones if neccessary.
+
+        segsToDelete = []
+
+        # Add time to all segments, and delete segments that haven't been active in a while.
+        self.IncrementSegTime( segsToDelete )
+
+        # If this cell is winner but the cell is not predicted then create a new segment to the lastActive FCells.
+        if self.winner and not self.predicted:
+            self.CreateSegment( lastVector, incidentCellWinners, initialPermanence, initialPosVariance, FActivationThresholdMin )
+
+        # If there is more than one segment active check if they are idential, if so delete one.
+#        self.CheckIfSegsIdentical( segsToDelete )
+
+        # For every active and lastActive segment...
+        for segment in self.segments:
+            if segment.active:
+                # If active segments have positive synapses to non-active columns then decay them.
+                # If active segments do not have terminal or incident synapses to active columns create them.
+                segment.DecayAndCreate( lastActiveFCellsBool, permanenceIncrement, permanenceDecrement,
+                    initialPermanence, maxNewFToFSynapses, maxSynapsesPerSegment, cellsPerColumn )
+
+                # Adjust the segments activation threshold depending on number of winners selected.
+                segment.AdjustThreshold( FActivationThresholdMin, FActivationThresholdMax )
+
+        # Delete segments that had all their incident or terminal synapses removed.
+        self.DeleteSegments( segsToDelete )
