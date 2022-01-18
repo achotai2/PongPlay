@@ -1,0 +1,57 @@
+------------------------------------------
+Time Step: 76
+
+DECAY AND CREATE
+Increase permanence, 264, to: 0.4
+Increase permanence, 370, to: 0.4
+Increase permanence, 517, to: 0.4
+Increase permanence, 781, to: 0.4
+Increase permanence, 831, to: 0.4
+Increase permanence, 947, to: 0.4
+Increase permanence, 1057, to: 0.4
+Increase permanence, 1114, to: 0.4
+Increase permanence, 1535, to: 0.4
+Increase permanence, 2084, to: 0.4
+Increase permanence, 2314, to: 0.4
+Increase permanence, 2395, to: 0.4
+Increase permanence, 2690, to: 0.4
+Increase permanence, 3304, to: 0.4
+Increase permanence, 3312, to: 0.4
+Increase permanence, 3511, to: 0.4
+Increase permanence, 3588, to: 0.4
+Increase permanence, 3835, to: 0.4
+Increase permanence, 3919, to: 0.4
+Increase permanence, 4149, to: 0.4
+Increase permanence, 4674, to: 0.4
+Increase permanence, 4802, to: 0.4
+Increase permanence, 4805, to: 0.4
+Increase permanence, 4981, to: 0.4
+Increase permanence, 5064, to: 0.4
+Increase permanence, 5669, to: 0.4
+Increase permanence, 5751, to: 0.4
+Increase permanence, 5935, to: 0.4
+Increase permanence, 5998, to: 0.4
+Increase permanence, 6126, to: 0.4
+Increase permanence, 6175, to: 0.4
+Increase permanence, 7210, to: 0.4
+Increase permanence, 7296, to: 0.4
+Increase permanence, 7324, to: 0.4
+Increase permanence, 7550, to: 0.4
+Increase permanence, 7946, to: 0.4
+Increase permanence, 7958, to: 0.4
+Increase permanence, 8115, to: 0.4
+Increase permanence, 8119, to: 0.4
+Increase permanence, 8159, to: 0.4
+Added new synapses to: []
+ADJUST THRESHOLD: 15.0
+CHECK IF PREDICTED
+CHECK OVERLAP
+Overlap Score: 0
+Passing Overlapping (Col, Cell): []
+Not Overlapping (Col, Cell): [264, 370, 517, 781, 831, 947, 1057, 1114, 1535, 2084, 2314, 2395, 2690, 3304, 3312, 3511, 3588, 3835, 3919, 4149, 4674, 4802, 4805, 4981, 5064, 5669, 5751, 5935, 5998, 6126, 6175, 7210, 7296, 7324, 7550, 7946, 7958, 8115, 8119, 8159]
+Activation Threshold: 15.0
+< Vector: [(-5.0, 5.0), (195.0, 205.0)], 
+ Active: False, Last Active: False, Time Since Active: 0, Activation Threshold: 15.0 
+ Active Incident Synapses: 40, [264, 370, 517, 781, 831, 947, 1057, 1114, 1535, 2084, 2314, 2395, 2690, 3304, 3312, 3511, 3588, 3835, 3919, 4149, 4674, 4802, 4805, 4981, 5064, 5669, 5751, 5935, 5998, 6126, 6175, 7210, 7296, 7324, 7550, 7946, 7958, 8115, 8119, 8159], [0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4], 
+ Active Terminal Synapses: 40, [4, 356, 400, 594, 967, 1100, 1311, 1361, 1453, 1524, 2003, 2197, 2437, 2612, 2957, 3427, 3520, 3646, 4582, 5227, 5743, 5780, 5816, 5880, 6114, 6357, 6382, 6453, 6655, 6755, 6836, 6898, 6987, 7413, 7750, 7757, 7791, 7916, 8065, 8163], [0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3] > 
+

@@ -1,5 +1,6 @@
 from random import sample, randrange
 from cell_and_synapse import FCell, Segment, BinarySearch, IndexIfItsIn, NoRepeatInsort, RepeatInsort, CheckInside
+from operator import add
 import numpy as np
 from time import time
 
@@ -103,11 +104,11 @@ class VectorMemory:
         log_data.append( "Active Segments: " + str( len( self.activeSegs ) ) + ", ActiveSegs: " + str( self.activeSegs ) )
         log_data.append( "LastActive Segs: " + str( len( self.lastActiveSegs ) ) + ", LastActiveSegs: " + str( self.lastActiveSegs ) )
 
-        predictiveFCells = []
+        predictedFCells = []
         for index, fCell in enumerate( self.FCells ):
-            if fCell.predictive:
-                predictiveFCells.append( index )
-        log_data.append( "Predictive Cells: " + str( len( predictiveFCells ) ) + ", " + str( predictiveFCells ) )
+            if fCell.predicted:
+                predictedFCells.append( index )
+        log_data.append( "Predicted Cells: " + str( len( predictedFCells ) ) + ", " + str( predictedFCells ) )
 
         nonDelSegments = []
         for index, seg in enumerate( self.segments ):
@@ -119,7 +120,7 @@ class VectorMemory:
         log_data.append( "Working Memory: " + str( self.workingMemory ) )
 
     def ActivateFCells( self ):
-    # Uses activated columns and cells in predictive state to put cells in active states.
+    # Uses activated columns and cells in predicted state to put cells in active states.
 
         # Clean up old active and lastActive FCells.
         for fCell in self.FCells:
@@ -137,30 +138,30 @@ class VectorMemory:
         self.burstingCols = []
 
         for col in self.columnSDR:
-            columnPredictive = False
+            columnpredicted = False
 
-            # Check if any cells in column are predictive. If yes then make them active.
+            # Check if any cells in column are predicted. If yes then make them active.
             for cell in range( col * self.FCellsPerColumn, ( col * self.FCellsPerColumn ) + self.FCellsPerColumn ):
-                if self.FCells[ cell ].predictive:
-                    columnPredictive = True
+                if self.FCells[ cell ].predicted:
+                    columnpredicted = True
                     self.FCells[ cell ].active = True
                     self.FCells[ cell ].winner = True
 
-            # If none predictive then burst column, making all cells in column active.
-            # Make the one with least chosen winners the winner cell.
-            if not columnPredictive:
+            # If none predicted then burst column, making all cells in column active.
+            # Choose a winner cell at random.
+            if not columnpredicted:
                 self.burstingCols.append( col )
 
-                minWinnersNum = -1
-                minWinnersIdx = 0
+#                minWinnersNum = -1
+#                minWinnersIdx = 0
                 for cell in range( col * self.FCellsPerColumn, ( col * self.FCellsPerColumn ) + self.FCellsPerColumn ):
                     self.FCells[ cell ].active = True
 
-                    if minWinnersNum == -1 or self.FCells[ cell ].numWinners < minWinnersNum:
-                        minWinnersNum = self.FCells[ cell ].numWinners
-                        minWinnersIdx = cell
+#                    if minWinnersNum == -1 or self.FCells[ cell ].numWinners < minWinnersNum:
+#                        minWinnersNum = self.FCells[ cell ].numWinners
+#                        minWinnersIdx = cell
 
-                self.FCells[ minWinnersIdx ].winner = True
+                self.FCells[ randrange( col * self.FCellsPerColumn, ( col * self.FCellsPerColumn ) + self.FCellsPerColumn ) ].winner = True
 
     def ActivateOCells( self ):
     # Use the active FCells to activate the OCells.
@@ -338,15 +339,15 @@ class VectorMemory:
     def PredictFCells( self, vector ):
     # Clear old predicted FCells and generate new predicted FCells.
 
-        # Clean up old predictive cells and segments.
+        # Clean up old predicted cells and segments.
         for fCell in self.FCells:
-            if fCell.predictive:
-                fCell.predictive = False
+            if fCell.predicted:
+                fCell.predicted = False
 
         self.activeSegs       = []
         self.lastActiveSegs   = []
 
-        # Check every activeFCell's segments, and activate or deactivate them; make FCell predictive or not.
+        # Check every activeFCell's segments, and activate or deactivate them; make FCell predicted or not.
         for index in range( len( self.segments ) ):
 
             if not self.segments[ index ].deleted:
@@ -370,17 +371,19 @@ class VectorMemory:
                     terminalFCellList = self.segments[ index ].ReturnTerminalFCells( self.FCellsPerColumn, self.lowerThreshold )
 
                     for cell in terminalFCellList:
-                        self.FCells[ cell ].predictive = True
+                        self.FCells[ cell ].predicted = True
 
                 else:
                     self.segments[ index ].active = False
 
         # If no segments are predicting cells then look into working memory if this vector is predicted there.
-        if len( self.activeSegs ) <= 0 and len( self.workingMemory ) > 0:
+        wokePredicted = False
+        if len( self.activeSegs ) == 0 and len( self.workingMemory ) > 0:
             for item in self.workingMemory:
-                if CheckInside( item[ 1 ], vector, self.initialPosVariance ):
+                if CheckInside( [ 0, 0 ], list( map( add, item[1], vector ) ), self.initialPosVariance ):
                     for cell in item[ 0 ]:
-                        self.FCells[ cell ].predictive = True
+                        wokePredicted = True
+                        self.FCells[ cell ].predicted = True
 
     def UpdateWorkingMemory( self, vector ):
     # Use the vector to update all vectors stored in workingMemory items, and add timeStep. If any

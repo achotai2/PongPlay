@@ -76,7 +76,7 @@ class Segment:
     # Also a vector which will be used to activate segment.
 
         self.deleted             = False      # If segment is deleted keep it, but don't look at it until the end report.
-        self.active              = False      # True means it's predictive, and above threshold terminal cells fired.
+        self.active              = False      # True means it's predicted, and above threshold terminal cells fired.
         self.lastActive          = False      # True means it was active last time step.
         self.timeSinceActive     = 0          # Time steps since this segment was active last.
         self.activationThreshold = minActivation
@@ -286,10 +286,17 @@ class Segment:
                     synapsesToAdd.append( cellIndex )
                     synIndex += 1
 
-        # Delete synapses whose permanences have decayed to zero.
+        # Delete synapses marked for deletion.
         for toDel in synapseToDelete:
             del self.incidentSynapses[ toDel ]
             del self.incidentPermanences[ toDel ]
+
+        # If the number of synapses is above maxSynapsesPerSegment then delete the ones with lowest synapses.
+        while maxSynapsesPerSegment - len( self.incidentSynapses ) < 0:
+            minValue = min( self.incidentPermanences )
+            minIndex = self.incidentPermanences.index( minValue )
+            del self.incidentSynapses[ minIndex ]
+            del self.incidentPermanences[ minIndex ]
 
         realSynapsesToAdd = sample( synapsesToAdd, min( len( synapsesToAdd ), maxSynapsesToAddPer, maxSynapsesPerSegment - len( self.incidentSynapses ) ) )
         self.self_record.append( "Added new synapses to: " + str( realSynapsesToAdd ) )
@@ -307,7 +314,7 @@ class FCell:
 
         self.active     = False
         self.lastActive = False
-        self.predictive = False
+        self.predicted  = False
         self.winner     = False
         self.lastWinner = False
 
