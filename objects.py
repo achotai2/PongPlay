@@ -4,6 +4,7 @@ import datetime
 import os
 import matplotlib.pyplot as plt
 from bisect import bisect_left
+from cell_and_synapse import BinarySearch
 
 from agent_objects import AgentOrange
 
@@ -33,6 +34,8 @@ box.shapesize( stretch_wid = objWidth / 10, stretch_len = objHeight / 10 )
 box.penup()
 box.goto( objCenterX, objCenterY )
 
+inputNoisePct = 0.0
+
 senseResX = 10
 senseResY = 10
 sensePosX = 100
@@ -59,11 +62,9 @@ log_file.write( "Program Start Time: " + str( start_date_and_time_string ) )
 log_file.write( "\n" )
 log_file.close()
 
-cellData              = []
 stateData             = []
 graphY1NumActiveCells = []
-graphY2NumActiveSegs  = []
-graphY3NumValidSegs   = []
+graphY2AvgNumSegs     = []
 graphXTimeSteps       = []
 
 def WriteDataToFiles( timeStep ):
@@ -85,30 +86,8 @@ def WriteDataToFiles( timeStep ):
         log_file.write( "\n" )
     log_file.close()
 
-    # Write segment data to individual reports.
-# CAREFUL WITH COMMENTING OUT THIS FUNCTION AS EACH SEGMENTS LOCAL DATA STORAGE ONLY REFRESHED HERE.
-    segment_report_data = Agent1.ReturnSegmentState( timeStep )
-
-    for index, segment_data in enumerate( segment_report_data ):
-
-        segment_report_file_name =  "Logs/" + start_date_and_time_string + "/Segment_" + str( index ) + ".txt"
-        segment_report_file = open( segment_report_file_name, 'a' )
-
-        for line in segment_data:
-            segment_report_file.write( line )
-            segment_report_file.write( "\n" )
-        segment_report_file.close()
-
 def AccumulateReportData( timeStep, boxColour ):
 # Accumulate the active cells and segments and input into report data.
-
-    activeCellsBool, activeSegments, numValidSegments = Agent1.GetReportData()
-
-    # A list of indices of all active cells.
-    activeCells = []
-    for index, cell in enumerate( activeCellsBool ):
-        if cell:
-            activeCells.append( index )
 
     # Gather state data.
     stateIndex = 0
@@ -120,54 +99,70 @@ def AccumulateReportData( timeStep, boxColour ):
         stateIndex += 1
     if stateIndex == len( stateData ):
         stateData.append( [ 1, sensePosX, sensePosY, boxColour ] )
-    currentState = stateIndex
 
-    # Find active cell identification data.
-    for i, aCell in enumerate( activeCellsBool ):
-        if i < len( cellData ):
-            if aCell:
-                cellData[ i ][ 1 ] += 1
-                entryIndex = 2
-                while entryIndex < len( cellData[ i ] ):
-                    if cellData[ i ][ entryIndex ][ 0 ] == currentState:
-                        cellData[ i ][ entryIndex ][ 1 ] += 1
-                        break
-                    entryIndex += 1
-                if entryIndex == len( cellData[ i ] ):
-                    cellData[ i ].append( [ currentState, 1 ] )
-        else:
-            cellData.append( [ i, 0 ] )
-            if aCell:
-                cellData[ -1 ][ 1 ] += 1
-                cellData[ -1 ].append( [ currentState, 1 ] )
+    Agent1.SendStateData( stateIndex )
 
     # Data for graph.
-    graphY1NumActiveCells.append( len( activeCells ) )
-    graphY2NumActiveSegs.append( len( activeSegments ) )
-    graphY3NumValidSegs.append( numValidSegments )
+    numActiveCells, averageActiveSegs = Agent1.GetGraphData()
+    graphY1NumActiveCells.append( numActiveCells )
+    graphY2AvgNumSegs.append( averageActiveSegs )
     graphXTimeSteps.append( timeStep )
 
 def exit_handler():
-# Upon program exit appends end time and closes log file.
+# Upon program exit collects data for Cell-Report log file, and produces the final plot.
 
+    # --------- Add time to log file. ---------
     log_file = open( log_file_name, 'a' )
     log_file.write( "\n" )
     log_file.write( "-------------------------------------------------------" )
     log_file.write( "\n" + "Program End Time: " + str( datetime.datetime.now() ) )
     log_file.close()
 
+    # --------- Prepare Cell-Report and collect individual cell data. ---------
     cell_report_data = []
     cell_report_data.append( start_date_and_time_string )
     cell_report_data.append( "-------------------------------------------------------" )
+    cellData = Agent1.GetStateData()
+
+    # Prepare data for state part of report.
+    minAcceptablePercentage = 50        # The minimal percent times a cell fires with a state to be considered.
+
+    finalStateCollection = [ [] for i in range( len( stateData ) ) ]
+    for cellIdx, cell in enumerate( cellData ):
+        for lookingInIndex in range( 1, len( cell ) ):
+            stateIdx    = cell[ lookingInIndex ][ 0 ]
+            stateCount  = cell[ lookingInIndex ][ 1 ]
+            countPct    = int( stateCount * 100 / stateData[ stateIdx ][ 0 ] )
+            if countPct > minAcceptablePercentage:
+                finalStateCollection[ stateIdx ].append( ( cellIdx, countPct ) )
+
+    for finIdx, item in enumerate( finalStateCollection ):
+        cell_report_data.append( "State: " + str( stateData[ finIdx ] ) )
+        cell_report_data.append( "Cells Active In State: " + str( sorted( item, key = lambda item: item[ 1 ], reverse = True ) ) )
+
+        itemsCells = [ i[ 0 ] for i in item ]
+        for finOverlapIdx, itemOverlap in enumerate( finalStateCollection ):
+            if finOverlapIdx != finIdx:
+                itemOverlapsCells = [ j[ 0 ] for j in itemOverlap ]
+                twoOverlaps       = [ value for value in itemsCells if value in itemOverlapsCells ]
+                cell_report_data.append( "States Overlap with State " + str( stateData[ finOverlapIdx ] ) + ": " + str( twoOverlaps ) )
+        cell_report_data.append( "" )
+
+    cell_report_data.append( "-------------------------------------------------------" )
+
+    # Prepare data for individual cell part of report.
     cell_report_data.append( "- \t Cell ID \t # Times Active \t ( State active in, % times active ) -" )
-    cellData.sort( key = lambda cellData: cellData[ 1 ], reverse = True )
-    for cell in cellData:
+    sortedCellIndex = sorted( range( len( cellData ) ), key = lambda k: cellData[ k ], reverse = True )
+    for cell in sortedCellIndex:
         state_data_str = ""
-        entryIndex = 2
-        while entryIndex < len( cell ):
-            state_data_str += "( " + str( [ stateData[ cell[ entryIndex ][ 0 ] ][ i ] for i in range( 1, len( stateData[ cell[ entryIndex ][ 0 ] ] ) ) ] ) + ", " + str( int( cell[ entryIndex ][ 1 ] / stateData[ cell[ entryIndex ][ 0 ] ][ 0 ] * 100 ) ) + "% ), "
+        thisCellData = cellData[ cell ]
+        entryIndex = 1
+        while entryIndex < len( thisCellData ):
+            state_data_str += "( " + str( [ stateData[ thisCellData[ entryIndex ][ 0 ] ][ i ] for i in range( 1, len( stateData[ thisCellData[ entryIndex ][ 0 ] ] ) ) ] ) + ", " + str( int( thisCellData[ entryIndex ][ 1 ] / stateData[ thisCellData[ entryIndex ][ 0 ] ][ 0 ] * 100 ) ) + "% ), "
             entryIndex += 1
-        cell_report_data.append( "\t" + str( cell[ 0 ] ) + "\t\t\t" + str( cell[ 1 ] ) + "\t\t" + state_data_str )
+        cell_report_data.append( "\t" + str( cell ) + "\t\t\t" + str( thisCellData[ 0 ] ) + "\t\t" + state_data_str )
+
+    # Write data into Cell-Report
     cell_report_data.append( "\n" + "Program End Time: " + str( datetime.datetime.now() ) )
     cell_report_file_name =  "Logs/" + start_date_and_time_string + "/Cell-Report" + ".txt"
     cell_report_file = open( cell_report_file_name, 'w' )
@@ -179,14 +174,13 @@ def exit_handler():
     # --------- Plot the graph. ----------------
     # plotting the points
     plt.plot( graphXTimeSteps, graphY1NumActiveCells, label = "# Active F-Cells" )
-    plt.plot( graphXTimeSteps, graphY2NumActiveSegs, label = "# Active Segments" )
-    plt.plot( graphXTimeSteps, graphY3NumValidSegs, label = "# Valid Segments" )
+    plt.plot( graphXTimeSteps, graphY2AvgNumSegs, label = "Average # Segments Per Cell" )
     # naming the x axis
     plt.xlabel('Time Steps')
     # naming the y axis
     plt.ylabel('# of Active')
     # giving a title to my graph
-    plt.title('# F-Cells and Segments Over Time')
+    plt.title('# F-Cells Over Time')
     plt.legend()
     # function to show the plot
     plt.savefig( "Logs/" + start_date_and_time_string + "/Plot_Data.png" )
@@ -212,7 +206,7 @@ while True:
         box.color( "red" )
 
     # Run agent brain and get motor vector.
-    organVector = Agent1.Brain( objCenterX, objCenterY, objWidth, objHeight, boxColour, sensePosX, sensePosY )
+    organVector = Agent1.Brain( objCenterX, objCenterY, objWidth, objHeight, boxColour, sensePosX, sensePosY, inputNoisePct )
 
     # Accumulate the active cells and segments and input into report data.
     AccumulateReportData( timeStep, boxColour )

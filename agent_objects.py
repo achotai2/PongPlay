@@ -1,6 +1,7 @@
 import sys
 import numpy
-from random import randrange
+from random import randrange, sample
+from bisect import bisect_left
 
 from htm.bindings.sdr import SDR, Metrics
 import htm.bindings.encoders
@@ -68,7 +69,7 @@ class AgentOrange:
             cellsPerColumn            = 4,
             numObjectCells            = 1000,
             FActivationThresholdMin   = 15,
-            FActivationThresholdMax   = 35,
+            FActivationThresholdMax   = 25,
             initialPermanence         = 0.3,
             lowerThreshold            = 0.1,
             permanenceIncrement       = 0.1,
@@ -78,9 +79,9 @@ class AgentOrange:
             initialPosVariance        = 10,
             OActivationThreshold      = 13,
             ObjectRepActivaton        = 25,
+            maxSynapsesToAddPer       = 5,
             maxSegmentsPerCell        = 32,
             maxSynapsesPerSegment     = 50,
-            maxSynapsesToAddPer       = 5,
             equalityThreshold         = 30,
             pctAllowedOCellConns      = 0.8
         )
@@ -98,11 +99,6 @@ class AgentOrange:
         self.centerX      = 0
         self.centerY      = 0
 
-    def ReturnSegmentState( self, timeStep ):
-    # Checks on every segment in self.vp and returns its state in a list.
-
-        return self.vp.ReturnSegmentData( timeStep )
-
     def GetLogData( self ):
     # Get the local log data and return it.
 
@@ -110,14 +106,26 @@ class AgentOrange:
 
         self.PrintBitRep( log_data )
 
+        log_data.append( "Last Vector: " + str( self.lastVector ) + ", New Vector: " + str( self.newVector ) )
+
         self.vp.BuildLogData( log_data )
 
         return log_data
 
-    def GetReportData( self ):
+    def SendStateData( self, stateNumber ):
     # Get the active cells from vp
 
-        return self.vp.ReturnData()
+        return self.vp.SendData( stateNumber )
+
+    def GetStateData( self ):
+    # Get the state data from vp.
+
+        return self.vp.GetStateInformation()
+
+    def GetGraphData( self ):
+    # Return the number of active cells in vp in this time step.
+
+        return self.vp.GetGraphData()
 
     def PrintBitRep( self, log_data ):
     # Prints out the bit represention.
@@ -137,7 +145,7 @@ class AgentOrange:
                         log_input = log_input + str( 3 )
             log_data.append( log_input )
 
-    def BuildLocalBitRep( self, centerX, centerY, objX, objY, objW, objH, objC ):
+    def BuildLocalBitRep( self, centerX, centerY, objX, objY, objW, objH, objC, noisePct ):
     # Builds a bit-rep SDR of localDim dimensions centered around point with resolution.
     # centerX and centerY is the center point of our vision field.
     # objX and objY: origin point of the object we are examining, objC: object colour, objW and objH: height and width.
@@ -158,16 +166,28 @@ class AgentOrange:
                 else:
                     self.localBitRep.append( x + ( y * self.resolutionX ) )
 
+        self.localBitRep.sort()
+
+        # Add noise.
+        if noisePct > 0.0:
+            noiseIndices = sample( range( maxArraySize ), int( noisePct * maxArraySize ) )
+            for n in noiseIndices:
+                index = bisect_left( self.localBitRep, n )
+                if index != len( self.localBitRep ) and self.localBitRep[ index ] == n:
+                    del self.localBitRep[ index ]
+                else:
+                    self.localBitRep.insert( index, n )
+
         bitRepSDR = SDR( maxArraySize )
         bitRepSDR.sparse = numpy.unique( self.localBitRep )
         return bitRepSDR
 
-    def EncodeSenseData ( self, sensePosX, sensePosY, objX, objY, objW, objH, objC ):
+    def EncodeSenseData ( self, sensePosX, sensePosY, objX, objY, objW, objH, objC, noisePct ):
     # Get sensory information and encode it as an SDR in the sense network.
 
         # Encode colour
 #        colourBits = self.colourEncoder.encode( colour )
-        objBits = self.BuildLocalBitRep( sensePosX, sensePosY, objX, objY, objW, objH, objC )
+        objBits = self.BuildLocalBitRep( sensePosX, sensePosY, objX, objY, objW, objH, objC, noisePct )
 
         # Concatenate all these encodings into one large encoding for Spatial Pooling.
 #        encoding = SDR( self.encodingWidth ).concatenate( [ colourBits ] )
@@ -179,32 +199,43 @@ class AgentOrange:
 #        self.whatColour.learn( pattern = senseSDR, classification = colour )
         return senseSDR
 
-    def Brain ( self, objX, objY, objW, objH, objC, sensePosX, sensePosY ):
+    def Brain ( self, objX, objY, objW, objH, objC, sensePosX, sensePosY, noisePct ):
     # The central brain function of the agent.
 
         # Encode the input column SDR for current position.
-        senseSDR = self.EncodeSenseData( sensePosX, sensePosY, objX, objY, objW, objH, objC )
+        senseSDR = self.EncodeSenseData( sensePosX, sensePosY, objX, objY, objW, objH, objC, noisePct )
 
         # Generate random motion vector for next time step.
         self.lastVector = self.newVector.copy()
-        whichPos = randrange( 4 )
-        chosePos = [ 100, 100 ]
-        if whichPos == 0:
-            chosePos[ 0 ] = 100
-            chosePos[ 1 ] = 100
-        elif whichPos == 1:
-            chosePos[ 0 ] = -100
-            chosePos[ 1 ] = -100
-        elif whichPos == 2:
-            chosePos[ 0 ] = -100
-            chosePos[ 1 ] = 100
-        elif whichPos == 3:
-            chosePos[ 0 ] = 100
-            chosePos[ 1 ] = -100
-        self.newVector[ 0 ] = chosePos[ 0 ] - sensePosX
-        self.newVector[ 1 ] = chosePos[ 1 ] - sensePosY
 
         # Compute cell activation and generate next predicted cells.
-        self.vp.Compute( senseSDR, self.lastVector, self.newVector )
+        vpDesiredNewVector = self.vp.Compute( senseSDR, self.lastVector )
+
+        if vpDesiredNewVector == None:
+            whichPos = randrange( 4 )
+            chosePos = [ 100, 100 ]
+            if whichPos == 0:
+                chosePos[ 0 ] = 100
+                chosePos[ 1 ] = 100
+            elif whichPos == 1:
+                chosePos[ 0 ] = -100
+                chosePos[ 1 ] = -100
+            elif whichPos == 2:
+                chosePos[ 0 ] = -100
+                chosePos[ 1 ] = 100
+            elif whichPos == 3:
+                chosePos[ 0 ] = 100
+                chosePos[ 1 ] = -100
+            self.newVector[ 0 ] = chosePos[ 0 ] - sensePosX
+            self.newVector[ 1 ] = chosePos[ 1 ] - sensePosY
+        elif len( vpDesiredNewVector ) != len( self.newVector ):
+            print( "VP outputting vector of wrong dimensions." )
+            exit()
+        else:
+            self.newVector[ 0 ] = vpDesiredNewVector[ 0 ]
+            self.newVector[ 1 ] = vpDesiredNewVector[ 1 ]
+
+        # Use FSegments to predict next set of inputs (put the cells into predictive states), given newVector.
+        self.vp.PredictFCells( self.newVector )
 
         return self.newVector
