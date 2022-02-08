@@ -83,7 +83,7 @@ class AgentOrange:
             maxSegmentsPerCell        = 32,
             maxSynapsesPerSegment     = 50,
             equalityThreshold         = 30,
-            pctAllowedOCellConns      = 0.8
+            pctExcitationActivation   = 0.8
         )
 
         self.lastVector = [ 0, 0 ]
