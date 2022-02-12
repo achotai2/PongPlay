@@ -65,29 +65,6 @@ def CheckInside( vector1, vector2, checkRange ):
 
     return True
 
-def FastOverlap( list1, list2, threshold, stopIfThreshold ):
-# Checks if overlap between two sorted lists is above or equal to threshold or not. Returns overlap as integer.
-# If stopIfThreshold = True then function will stop if threshold overlap is reached, or if not possible to be reached.
-
-    i       = 0
-    j       = 0
-    overlap = 0
-
-    while i < len( list1 ) and j < len( list2 ):
-        if list1[ i ] < list2[ j ]:
-            i += 1
-        elif list1[ i ] > list2[ j ]:
-            j += 1
-        else:
-            overlap += 1
-            i += 1
-            j += 1
-
-        if stopIfThreshold and ( overlap >= threshold or overlap + min( len( list1 ) - i, len( list2 ) - j ) < threshold ):
-            break
-
-    return overlap
-
 #-------------------------------------------------------------------------------
 
 class Segment:
@@ -98,12 +75,11 @@ class Segment:
     # Within this create an FSegment, with multiple synapses to FCells from these FCells.
     # Also a vector which will be used to activate segment.
 
-        self.active              = True             # True means it's predictive, and above threshold terminal cells fired.
-        self.lastActive          = False            # True means it was active last time step.
-        self.excited             = False            # True means it was active some time recently.
-        self.lastOverlapScore    = 0                # The overlap score that this segment last attained.
-        self.timeSinceActive     = 0                # Time steps since this segment was active last.
-        self.activationThreshold = minActivation    # The minimum overlap for segment to become active.
+        self.active              = True      # True means it's predictive, and above threshold terminal cells fired.
+        self.lastActive          = False     # True means it was active last time step.
+        self.lastOverlapScore    = 0         # The overlap score that this segment last attained.
+        self.timeSinceActive     = 0         # Time steps since this segment was active last.
+        self.activationThreshold = minActivation
 
         # FSegment portion--------
         self.incidentSynapses    = incidentCellsList.copy()
@@ -167,10 +143,14 @@ class Segment:
 
         return True
 
-    def CheckOverlap( self, cellList ):
+    def CheckOverlap( self, FCellListBool, lowerThreshold ):
     # Check FColumnList for overlap with incidentSynapses. If overlap is above threshold return True, otherwise False.
 
-        self.lastOverlapScore = FastOverlap( self.incidentSynapses, cellList, self.activationThreshold, True )
+        self.lastOverlapScore = 0
+
+        for synapse in self.incidentSynapses:
+            if FCellListBool[ synapse ]:
+                self.lastOverlapScore += 1
 
         if self.lastOverlapScore >= self.activationThreshold:
             return True
@@ -188,59 +168,66 @@ class Segment:
 
         self.activationThreshold = ( ( minActivation - maxActivation ) * 2 ** ( -1 * numWinners ) ) + maxActivation
 
-    def DecayAndCreate( self, activeCells, winnerCells, permanenceIncrement, permanenceDecrement, initialPermanence, maxSynapsesToAddPer, maxSynapsesPerSegment, cellsPerColumn, careAboutColumns ):
-    # Increase synapse strength to cells that already have synapses.
-    # Decrease synapse strength to not cells that have synapses.
-    # Build new synapses to cells that don't have synapses, but only one cell per column can have synapses.
+    def DecayAndCreate( self, lastActiveCellsBool, lastWinnerCells, permanenceIncrement, permanenceDecrement, initialPermanence,
+        maxSynapsesToAddPer, maxSynapsesPerSegment, cellsPerColumn, terminalState, maxSynapseStrength ):
+    # Increase synapse strength to lastActive cells that already have synapses.
+    # Decrease synapse strength to not lastActive cells that have synapses.
+    # Build new synapses to lastActive cells that don't have synapses, but only one cell per column can have synapses.
     # Delete synapses whose permanences have decayed to zero.
+
+# DOES THIS REALLY NEED LASTACTIVECELL BOOL AND LASTWINNERCELLS? UNLESS THE COLUMN IS BURSTING THEN THESE TWO SHOULD BE EQUAL
+# NOW THAT WE'VE MADE ONLY ONE ACTIVE CELL PER COLUMN.
 
         synapseToDelete = []
         synapseToAdd    = []
 
-        synIndex = 0
-        actIndex = 0
-        while synIndex < len( self.incidentSynapses ) or actIndex < len( activeCells ):
+        if terminalState:
+            synIndex = 0
+            for cellIndex, lCellActive in enumerate( lastActiveCellsBool ):
 
-            # Increase synapse strength to active cells that already have synapses.
-            if synIndex < len( self.incidentSynapses ) and actIndex < len( activeCells ) and self.incidentSynapses[ synIndex ] == activeCells[ actIndex ]:
-                self.incidentPermanences[ synIndex ] += permanenceIncrement
-                if self.incidentPermanences[ synIndex ] > 1.0:
-                    self.incidentPermanences[ synIndex ] = 1.0
-
-                if synIndex < len( self.incidentSynapses ):
-                    synIndex += 1
-                if actIndex < len( activeCells ):
-                    actIndex += 1
-
-            # Decrease synapse strength to not active cells that have synapses.
-            elif synIndex < len( self.incidentSynapses ) and ( actIndex == len( activeCells ) or self.incidentSynapses[ synIndex ] < activeCells[ actIndex ] ):
-                self.incidentPermanences[ synIndex ] -= permanenceDecrement
-                if self.incidentPermanences[ synIndex ] < 0.0:
-                    synapseToDelete.insert( 0, synIndex )
-
-                if synIndex < len( self.incidentSynapses ):
+                # Increase synapse strength to lastActive cells that already have synapses.
+                if lCellActive and synIndex < len( self.incidentSynapses ) and self.incidentSynapses[ synIndex ] == cellIndex:
+                    self.incidentPermanences[ synIndex ] += permanenceIncrement
+                    if self.incidentPermanences[ synIndex ] > maxSynapseStrength:
+                        self.incidentPermanences[ synIndex ] = maxSynapseStrength
                     synIndex += 1
 
-            # Build new synapses to cells that don't have synapses.
-            # If careAboutColumns is True then only one cell per column can have synapses, so check for this first.
-            else:
-                # Check if this is a winnerCell, since if the col is bursting all the cells will be active on it.
-                if BinarySearch( winnerCells, activeCells[ actIndex ] ):
-                    thisColumn = int( activeCells[ actIndex ] / cellsPerColumn )
-                    # Check if there is already a synapse to this column.
-                    alreadyExists = False
-                    if careAboutColumns:
-                        for ins in self.incidentSynapses:
-                            if int( ins / cellsPerColumn ) == thisColumn:
-                                alreadyExists = True
-                    if not alreadyExists:
-                        synapseToAdd.append( activeCells[ actIndex ] )
+                # Decrease synapse strength to not lastActive cells that have synapses.
+                elif not lCellActive and synIndex < len( self.incidentSynapses ) and self.incidentSynapses[ synIndex ] == cellIndex:
+                    self.incidentPermanences[ synIndex ] -= permanenceDecrement
+                    if self.incidentPermanences[ synIndex ] < 0.0:
+                        NoRepeatInsort( synapseToDelete, synIndex )
+                    synIndex += 1
 
-                if actIndex < len( activeCells ):
-                    actIndex += 1
+                # Build new synapses to lastActive cells that don't have synapses.
+                # Only one cell per column can have synapses, so check for this first.
+                elif lCellActive:
+                    addNewSynapse = False
+
+                    if BinarySearch( lastWinnerCells, cellIndex ):
+                        thisColumn = int( cellIndex / cellsPerColumn )
+                        if synIndex == 0:
+                            if int( self.incidentSynapses[ synIndex ] / cellsPerColumn ) != thisColumn:
+                                addNewSynapse = True
+                        elif synIndex < len( self.incidentSynapses ):
+                            if int( self.incidentSynapses[ synIndex ] / cellsPerColumn ) != thisColumn and int( self.incidentSynapses[ synIndex - 1 ] / cellsPerColumn ) != thisColumn:
+                                addNewSynapse = True
+                        elif synIndex == len( self.incidentSynapses ):
+                            if int( self.incidentSynapses[ synIndex - 1 ] / cellsPerColumn ) != thisColumn:
+                                addNewSynapse = True
+
+                    if addNewSynapse:
+                        synapseToAdd.append( cellIndex )
+                        synIndex += 1
+
+        else:
+            for index in range( len( self.incidentPermanences ) ):
+                self.incidentPermanences[ index ] -= permanenceDecrement
+                if self.incidentPermanences[ index ] < 0.0:
+                    NoRepeatInsort( synapseToDelete, index )
 
         # Delete synapses marked for deletion.
-        for toDel in synapseToDelete:
+        for toDel in reversed( synapseToDelete ):
             del self.incidentSynapses[ toDel ]
             del self.incidentPermanences[ toDel ]
 
@@ -258,29 +245,32 @@ class Segment:
             del self.incidentPermanences[ minIndex ]
 
     def ReturnIncidentCells( self ):
-    # Return as a list the incident cells for this segment.
+    # Returns the incident cells as a list.
 
         return self.incidentSynapses.copy()
 
-    def IncrementTime( self, maxTimeSinceActive ):
-    # Up my seg time.
+    def ReturnPermanenceSum( self ):
+    # Returns the sum of all permanences for this segment.
 
-        self.timeSinceActive += 1
-        if self.timeSinceActive >= maxTimeSinceActive:
-            return True
-        else:
-            return False
+        permanenceSum = 0.0
+
+        for synapse in self.incidentPermanences:
+            permanenceSum += synapse
+
+        return permanenceSum
 
 # ------------------------------------------------------------------------------
 
 class FCell:
 
-    def __init__( self, initialPermanence, numOCells ):
+    def __init__( self, initialPermanence, numOCells, pctAllowedOCellConns, segmentDecay ):
     # Create a new feature level cell with synapses to OCells.
 
         self.active     = False
+        self.lastActive = False
         self.predicted  = False
         self.winner     = False
+        self.lastWinner = False
         self.primed     = False
 
         self.activeCount = 0
@@ -288,6 +278,7 @@ class FCell:
         self.statesCount = []
 
         self.segments     = []
+        self.segmentDecay = segmentDecay
 
 #    def __repr__( self ):
 #    # Returns string properties of the FCell.
@@ -322,10 +313,35 @@ class FCell:
 
         return toReturn
 
+    def OCellConnect( self, totalActiveOCells, permanenceIncrement, permanenceDecrement ):
+    # Look through the ordered indices of totalOCellConnections. Choose the lowest one in our OCellConnections
+    # to remove, and the highest one not in our OCellConnections to add.
+
+        for index, oCell in enumerate( self.OCellConnections ):
+            if BinarySearch( totalActiveOCells, oCell ):
+                self.OCellPermanences[ index ] += permanenceIncrement
+
+                if self.OCellPermanences[ index ] > 1.0:
+                    self.OCellPermanences[ index ] = 1.0
+            else:
+                self.OCellPermanences[ index ] -= permanenceDecrement
+
+                if self.OCellPermanences[ index ] < 0.0:
+                    self.OCellPermanences[ index ] = 0.0
+
     def NumSegments( self ):
     # Return the number of segments terminating on this cell.
 
         return len( self.segments )
+
+    def IncrementSegTime( self, segsToDeleteList ):
+    # Increment every OSegments timeSinceActive.
+
+        for segIndx in range( len( self.segments ) ):
+            self.segments[ segIndx ].timeSinceActive += 1
+
+            if self.segments[ segIndx ].timeSinceActive > self.segmentDecay:
+                NoRepeatInsort( segsToDeleteList, segIndx )
 
     def DeleteSegments( self, segsToDeleteList ):
     # Deletes all segments in segsToDeleteList.
@@ -339,46 +355,45 @@ class FCell:
         for segment in self.segments:
             if segment.lastActive:
                 segment.lastActive = False
-
+# MAYBE DONT NEED LAST ACTIVE SEGMENTS
             if segment.active:
                 segment.active     = False
                 segment.lastActive = True
 
-    def HighestOverlapForActiveSegment( self ):
-    # For all active segments on this cell, returns the the one with the highest lastOverlapScore.
+    def ReturnActivationLevel( self ):
+    # Return the sum of permances for all active segments terminating on this FCell.
 
-        highestOverlap = 0
+        activationLevel = 0.0
 
         for seg in self.segments:
-            if seg.active and seg.lastOverlapScore > highestOverlap:
-                highestOverlap = seg.lastOverlapScore
+            if seg.active:
+                activationLevel += seg.ReturnPermanenceSum()
 
-        return highestOverlap
+        return activationLevel
 
-    def CheckIfPredicted( self, myIndex, synapseList, predictionThreshold ):
+    def CheckIfPredicted( self, activeFCellsBool, cellsPerColumn, vector, lowerThreshold ):
     # Checks if this cell has any segments predicting by checking incident overlap and vector.
     # If so then activate that segment and make cell predicted, otherwise not predicted.
 
-        self.predicted = False
+# SHOULD IMPROVE THIS BY CHECKING IF MULTIPLE SEGMENTS ARE ACTIVE WE ONLY WANT THE ONE WITH THE MOST OVERLAP MAYBE.
+# MAYBE COMBINE THE TWO INTO ONE, OR DELETE ONE, IF ACTIVE TOGETHER OFTEN.
 
-        for seg in self.segments:
-            cellsOnSynapse = seg.ReturnIncidentCells()
-            overlap = 0
-            for cell in cellsOnSynapse:
-                if synapseList[ cell ][ myIndex ]:
-                    overlap += 1
+# CAN ALSO IMPROVE BY MODIFYING SEGMENTS SO WE DONT HAVE TO CHECK EACH SEGMENT SEPARATELY. CAN INSTEAD GO THROUGH ALL THE
+# FCELLS ONCE AND CHECK ALL SEGMENTS AT ONCE. IT SHOULD BE POSSIBLE TO DO THIS.
 
-            if overlap >= predictionThreshold:
-                self.predicted = True
-                return True
+        anySegments = False
 
-        return False
+        for segment in self.segments:
+            if segment.Inside( vector ) and segment.CheckOverlap( activeFCellsBool, lowerThreshold ):
+                segment.active = True
+                anySegments    = True
 
-    def UpdateCellState( self ):
-    # Make inactive and not winner.
-
-        self.active = False
-        self.winner = False
+        if anySegments:
+            self.predicted = True
+            return True
+        else:
+            self.predicted = False
+            return False
 
     def CheckIfSegsIdentical( self, segsToDelete, activeSegs, equalityThreshold ):
     # Compares all active segments to see if they have identical vectors and active synapse bundles.
@@ -394,39 +409,44 @@ class FCell:
                         if self.segments[ actSeg1 ].Equality( self.segments[ actSeg2 ], equalityThreshold ):
                             NoRepeatInsort( segsToDelete, actSeg2 )
                     else:
-                        print( "Error in CheckIfSegsIdentical()")
+                        print( "Error in CheckIfSegsIdentical()" )
                         exit()
 
-    def SegmentLearning( self, activeOCells, initialPermanence, FActivationThresholdMin, FActivationThresholdMax, maxTimeSinceActive,
-        permanenceIncrement, permanenceDecrement, maxSynapsesToAddPer, maxSynapsesPerSegment, cellsPerColumn, equalityThreshold ):
+    def CreateSegment( self, vector, incidentCellWinners, initialPermanence, initialPosVariance, FActivationThresholdMin, cellsPerColumn  ):
+    # Create a new Segment, terminal on these active columns, incident on last active columns.
+
+        newSegment = Segment( incidentCellWinners, initialPermanence, vector, initialPosVariance, FActivationThresholdMin )
+        self.segments.append( newSegment )
+
+    def SegmentLearning( self, lastVector, lastActiveFCellsBool, incidentCellWinners, initialPermanence, initialPosVariance,
+        FActivationThresholdMin, FActivationThresholdMax, permanenceIncrement, permanenceDecrement,
+        maxNewFToFSynapses, maxSynapsesPerSegment, cellsPerColumn, equalityThreshold ):
     # Perform learning on segments, and create new ones if neccessary.
 
         segsToDelete = []
 
         # Add time to all segments, and delete segments that haven't been active in a while.
-        for segIndex, seg in enumerate( self.segments ):
-            if seg.IncrementTime( maxTimeSinceActive ):
-                segsToDelete[ segIndex ]
+        self.IncrementSegTime( segsToDelete )
 
-        # If this cell is active then check it against activeOCells to see if it has any matching segments.
-        if self.active:
-            activeSegs = []
-            for index, seg in enumerate( self.segments ):
-                if seg.CheckOverlap( activeOCells ):
-                    activeSegs.append( index )
+        # If this cell is winner but the cell is not predicted then create a new segment to the lastActive FCells.
+        if self.winner and not self.predicted:
+            self.CreateSegment( lastVector, incidentCellWinners, initialPermanence, initialPosVariance, FActivationThresholdMin, cellsPerColumn )
 
-                    # If so then perform learning on it.
-                    seg.DecayAndCreate( activeOCells, activeOCells, permanenceIncrement, permanenceDecrement, initialPermanence, maxSynapsesToAddPer, maxSynapsesPerSegment, cellsPerColumn, False )
+        # For every active and lastActive segment...
+        activeSegs = []
+        for index, segment in enumerate( self.segments ):
+            if segment.active:
+                activeSegs.append( index )
+                # If active segments have positive synapses to non-active columns then decay them.
+                # If active segments do not have terminal or incident synapses to active columns create them.
+                segment.DecayAndCreate( lastActiveFCellsBool, incidentCellWinners, permanenceIncrement, permanenceDecrement,
+                    initialPermanence, maxNewFToFSynapses, maxSynapsesPerSegment, cellsPerColumn, self.active, 1.0 )
 
-                    # Adjust the segments activation threshold depending on number of winners selected.
-                    seg.AdjustThreshold( FActivationThresholdMin, FActivationThresholdMax )
+                # Adjust the segments activation threshold depending on number of winners selected.
+                segment.AdjustThreshold( FActivationThresholdMin, FActivationThresholdMax )
 
-            # If no segments align with active OCells then create a new segment.
-            if len( activeSegs ) == 0:
-                self.segments.append( Segment( activeOCells, initialPermanence, [], 0, FActivationThresholdMin ) )
-
-            # If there is more than one segment active check if they are idential, if so delete one.
-            self.CheckIfSegsIdentical( segsToDelete, activeSegs, equalityThreshold )
+        # If there is more than one segment active check if they are idential, if so delete one.
+        self.CheckIfSegsIdentical( segsToDelete, activeSegs, equalityThreshold )
 
         # Delete segments that had all their incident or terminal synapses removed.
         self.DeleteSegments( segsToDelete )
@@ -440,8 +460,6 @@ class OCell:
 
         self.active = False
 
-        self.locations = [ [ 0, 0 ] ]
-
         self.segments = []
 
     def Deactivate( self ):
@@ -451,117 +469,146 @@ class OCell:
         for seg in self.segments:
             seg.active = False
 
-        self.locations = [ [ 0, 0 ] ]
+    def CheckOverlapAndActivate( self, predictedActiveCellsBool ):
+    # Check this inactive OCells's segments for overlap with predictedActiveCells and see if it become active.
 
-    def UpdateSegmentActivity( self ):
-    # Turns all active segments to lastActive, and lastActive to inactive.
+        toReturn = False
+
+        if len( self.segments ) > 0:
+            matching = 0
+
+            for wmSeg in predictedActiveCellsBool:
+                for seg in self.segments:
+                    if seg.CheckOverlap( wmSeg, 0 ):
+                        matching += 1
+
+            if matching / len( self.segments ) >= 0.5:
+                self.active = True
+                toReturn = True
+
+        return toReturn
+
+    def OCellLearning( self, workingMemoryBool, winnerCells, cellsPerColumn, permanenceIncrement, permanenceDecrement, initialPermanence, maxSynapsesToAddPer, maxSynapsesPerSegment, minActivation ):
+    # For all active OCells check if they have segments to all segments in working memory. For those that exist learn on them,
+    # for those that don't exist, create one.
+
+        for seg in workingMemoryBool:
+            itAlreadyExists = False
+
+            for mySegs in self.segments:
+                if mySegs.CheckOverlap( seg, 0 ):
+                    mySegs.DecayAndCreate( seg, winnerCells, permanenceIncrement, permanenceDecrement, initialPermanence,
+                        maxSynapsesToAddPer, maxSynapsesPerSegment, cellsPerColumn, self.active, 1.0 )
+                    itAlreadyExists = True
+                    break
+
+            if not itAlreadyExists:
+                self.segments.append( Segment( winnerCells, initialPermanence, [], 0, minActivation ) )
+
+    def GetOverlapScore( self ):
+    # Returns the overlap score of all active segments.
+
+        overlapScore = 0
 
         for seg in self.segments:
-            if seg.active:
-                seg.active     = False
-                seg.lastActive = True
-            else:
-                seg.lastActive = False
+            overlapScore += seg.lastOverlapScore
 
-    def UpdateVector( self, vector ):
-    # Update the local hypothesis of what location we are looking at on our object.
+        return overlapScore
 
-        if self.active:
-            for loc in self.locations:
-                if len( vector ) != len( loc ):
-                    print( "Vector sent to OCell not of right length." )
-                    exit()
+# ------------------------------------------------------------------------------
 
-                for index in range( len( loc ) ):
-                    loc[ index ] += vector[ index ]
+class WorkingMemory:
 
-    def CheckSegmentActivation( self, activeFCells ):
-    # Check this active OCells's segments for overlap with activeFCells and see if they become active.
-    # First though check if the vector fits that segment.
+    def __init__( self, dimensionsOfSpace ):
+    # Create the basis of working memory.
 
-        if self.active:
-            for seg in self.segments:
-                for loc in self.locations:
-                    if seg.Inside( loc ) and seg.CheckOverlap( activeFCells ):
-                        seg.active  = True
-                        seg.excited = True
+        self.segments       = []
+        self.stabilityScore = 0
 
-    def CheckIfSegsIdentical( self, segsToDelete, activeSegs, equalityThreshold ):
-    # Compares all active segments to see if they have identical vectors and active synapse bundles.
-    # If any do then delete one of them.
+        self.position       = []
+        for x in range( dimensionsOfSpace ):
+            self.position.append( 0 )
 
-        if len( activeSegs ) > 1:
-            for index1 in range( len( activeSegs ) - 1 ):
-                for index2 in range( index1 + 1, len( activeSegs ) ):
-                    actSeg1 = activeSegs[ index1 ]
-                    actSeg2 = activeSegs[ index2 ]
+    def Update( self, vector, activeFCellsBool, winnerCells, permanenceIncrement, permanenceDecrement, initialPermanence, maxSynapsesToAddPer, maxSynapsesPerSegment, segmentDecay, FCellsPerColumn, posRange, activationThreshold, lowerThreshold ):
+    # Use the vector to update the current position. Add a timestep to all segments and check how old they are.
+    # Check the active FCells against the segment at self.position; if it doesn't match then update it with new segment;
+    # if it does match then perform learning on segment.
 
-                    if actSeg1 != actSeg2:
-                        if self.segments[ actSeg1 ].Equality( self.segments[ actSeg2 ], equalityThreshold ):
-                            NoRepeatInsort( segsToDelete, actSeg2 )
-                    else:
-                        print( "Error in CheckIfSegsIdentical()")
-                        exit()
-
-    def DeleteSegments( self, segsToDeleteList ):
-    # Deletes all segments in segsToDeleteList.
-
-        for index in reversed( segsToDeleteList ):
-            del self.segments[ index ]
-
-    def SegmentLearning( self, activeFCells, winnerFCells, permanenceIncrement, permanenceDecrement, initialPermanence,
-        maxSynapsesToAddPer, maxSynapsesPerSegment, cellsPerColumn, FActivationThresholdMin, FActivationThresholdMax,
-        initialPosVariance, maxTimeSinceActive, equalityThreshold ):
-    # Check this active OCell if it has segments which have been activated.
-    # If they do then activate and strengthen segment, perform learning on it (DecayAndCreate).
-    # If they don't then create a new segment.
+        # Update the vector.
+        if len( vector ) != len( self.position ):
+            print( "Vectors of wrong size sent to Working Memory" )
+            exit()
+        for x in range( len( vector ) ):
+            self.position[ x ] += vector[ x ]
 
         segsToDelete = []
+        sumOverlap   = 0
 
-        # Add time to all segments, and delete segments that haven't been active in a while.
-        for segIndex, seg in enumerate( self.segments ):
-            if seg.IncrementTime( maxTimeSinceActive ):
-                segsToDelete.append( segIndex )
+        validSegment = False
+        for index, seg in enumerate( self.segments ):
+            # Increment the segment time.
+            seg.timeSinceActive += 1
+            if seg.timeSinceActive >= segmentDecay:
+                NoRepeatInsort( segsToDelete, index )
 
-# SHOULD BRING IN SEGS TO DELETE, TIME SINCE LAST ACTIVE, LIKE WHAT WE HAVE WITH FCELLS NOW, AND ADJUST OVERLAP THRESHOLD.
-        if self.active:
-            activeSegs = []
-            for index, seg in enumerate( self.segments ):
-                if seg.active:
-                    activeSegs.append( index )
-                    # Perform learning on segment.
-                    seg.DecayAndCreate( activeFCells, winnerFCells, permanenceIncrement, permanenceDecrement, initialPermanence, maxSynapsesToAddPer, maxSynapsesPerSegment, cellsPerColumn, True )
+            # Check the activeCells against the segment at position.
+            if seg.Inside( self.position ):
+                if seg.CheckOverlap( activeFCellsBool, lowerThreshold ):
+                    # If the segment in position agrees then perform learning on it.
+                    seg.DecayAndCreate( activeFCellsBool, winnerCells, permanenceIncrement, permanenceDecrement, initialPermanence,
+                        maxSynapsesToAddPer, maxSynapsesPerSegment, FCellsPerColumn, True, 0.3 )
+                    validSegment = True
 
-                    # Adjust the segments activation threshold depending on number of winners selected.
-                    seg.AdjustThreshold( FActivationThresholdMin, FActivationThresholdMax )
+                else:
+                    # If the segment in position doesn't agree then delete it and create a new one in that position.
+                    NoRepeatInsort( segsToDelete, index )
 
-            if len( activeSegs ) == 0:
-# WHAT VECTOR DO WE WANT TO CREATE IT WITH? DO WE CREATE A SEGMENT WITH ALL VECTORS IF MULTIPLE? OR DON"T CREATE IF MULTIPLE?
-                self.segments.append( Segment( activeFCells, initialPermanence, self.locations[ 0 ], initialPosVariance, FActivationThresholdMin ) )
+                sumOverlap += seg.lastOverlapScore
 
-            # If there is more than one segment active check if they are idential, if so delete one.
-            self.CheckIfSegsIdentical( segsToDelete, activeSegs, equalityThreshold )
+        # Calculate stabilityScore.
+        if sumOverlap > 0:
+            self.stabilityScore = int( 100 * sumOverlap / ( len( self.segments ) * activationThreshold ) )
 
-        # Delete segments that had all their incident or terminal synapses removed.
-        self.DeleteSegments( segsToDelete )
+        if not validSegment:
+            self.segments.append( Segment( winnerCells, initialPermanence, self.position, posRange, activationThreshold ) )
 
-    def GetPredicted( self, vector, numberOfFCells ):
-    # Using the vector get what FCells are predicted.
+        # Delete those segments marked for deletion.
+        for index in reversed( segsToDelete ):
+            del self.segments[ index ]
 
-        FCellsBool = [ False ] * numberOfFCells
+    def GetPredictedCells( self, newVector ):
+    # Use new vector to get the segment at that new location, if it exists, and return the incident cells.
+    # If none then return an empty list.
 
-        if self.active:
+        if len( newVector ) != len( self.position ):
+            print( "Vectors of wrong size sent to Working Memory" )
+            exit()
 
-            for seg in self.segments:
-                for loc in self.locations:
-                    if len( vector ) != len( loc ):
-                        print( "Vector sent to OCell not of right length." )
-                        exit()
+        newPosition = []
+        for x in range( len( newVector ) ):
+            newPosition.append( self.position[ x ] + newVector[ x ] )
 
-                    if seg.Inside( [ loc[ i ] + vector[ i ] for i in range( len( loc ) ) ] ):
-                        FCellsList = seg.ReturnIncidentCells()
+        for seg in self.segments:
+            if seg.Inside( newPosition ):
+                return seg.ReturnIncidentCells()
 
-                        for fCell in FCellsList:
-                            FCellsBool[ fCell ] = True
+        return []
 
-        return FCellsBool
+    def ReturnSegmentData( self ):
+    # Returns the incident cells of all segments as a list of lists.
+
+        segmentData = []
+        for seg in self.segments:
+            segmentData.append( seg.vector )
+            segmentData.append( seg.ReturnIncidentCells() )
+
+        return segmentData
+
+    def GetSegmentsAsList( self ):
+    # Return the segment synapses as a list of lists.
+
+        allSegments = []
+        for seg in self.segments:
+            allSegments.append( seg.ReturnIncidentCells() )
+
+        return allSegments

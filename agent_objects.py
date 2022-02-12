@@ -70,12 +70,13 @@ class AgentOrange:
             numObjectCells            = 1000,
             FActivationThresholdMin   = 15,
             FActivationThresholdMax   = 25,
+            workingMemoryThreshold    = 35,
             initialPermanence         = 0.3,
             lowerThreshold            = 0.1,
             permanenceIncrement       = 0.1,
             permanenceDecrement       = 0.05,
             permanenceDecay           = 0.001,
-            segmentDecay              = 10000,
+            segmentDecay              = 5000,
             initialPosVariance        = 10,
             OActivationThreshold      = 13,
             ObjectRepActivaton        = 25,
@@ -83,7 +84,7 @@ class AgentOrange:
             maxSegmentsPerCell        = 32,
             maxSynapsesPerSegment     = 50,
             equalityThreshold         = 30,
-            pctExcitationActivation   = 0.8
+            pctAllowedOCellConns      = 0.8
         )
 
         self.lastVector = [ 0, 0 ]

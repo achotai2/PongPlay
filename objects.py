@@ -65,6 +65,7 @@ log_file.close()
 stateData             = []
 graphY1NumActiveCells = []
 graphY2AvgNumSegs     = []
+graphY3StabilityScore = []
 graphXTimeSteps       = []
 
 def WriteDataToFiles( timeStep ):
@@ -103,9 +104,10 @@ def AccumulateReportData( timeStep, boxColour ):
     Agent1.SendStateData( stateIndex )
 
     # Data for graph.
-    numActiveCells, averageActiveSegs = Agent1.GetGraphData()
+    numActiveCells, averageActiveSegs, stabilityScore = Agent1.GetGraphData()
     graphY1NumActiveCells.append( numActiveCells )
     graphY2AvgNumSegs.append( averageActiveSegs )
+    graphY3StabilityScore.append( stabilityScore )
     graphXTimeSteps.append( timeStep )
 
 def exit_handler():
@@ -175,6 +177,7 @@ def exit_handler():
     # plotting the points
     plt.plot( graphXTimeSteps, graphY1NumActiveCells, label = "# Active F-Cells" )
     plt.plot( graphXTimeSteps, graphY2AvgNumSegs, label = "Average # Segments Per Cell" )
+    plt.plot( graphXTimeSteps, graphY3StabilityScore, label = "StabilityScore of Working Memory" )
     # naming the x axis
     plt.xlabel('Time Steps')
     # naming the y axis
