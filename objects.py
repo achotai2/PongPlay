@@ -65,7 +65,6 @@ log_file.close()
 stateData             = []
 graphY1NumActiveCells = []
 graphY2AvgNumSegs     = []
-graphY3StabilityScore = []
 graphXTimeSteps       = []
 
 def WriteDataToFiles( timeStep ):
@@ -104,10 +103,9 @@ def AccumulateReportData( timeStep, boxColour ):
     Agent1.SendStateData( stateIndex )
 
     # Data for graph.
-    numActiveCells, averageActiveSegs, stabilityScore = Agent1.GetGraphData()
+    numActiveCells, averageActiveSegs = Agent1.GetGraphData()
     graphY1NumActiveCells.append( numActiveCells )
     graphY2AvgNumSegs.append( averageActiveSegs )
-    graphY3StabilityScore.append( stabilityScore )
     graphXTimeSteps.append( timeStep )
 
 def exit_handler():
@@ -147,7 +145,7 @@ def exit_handler():
             if finOverlapIdx != finIdx:
                 itemOverlapsCells = [ j[ 0 ] for j in itemOverlap ]
                 twoOverlaps       = [ value for value in itemsCells if value in itemOverlapsCells ]
-                cell_report_data.append( "States Overlap with State " + str( stateData[ finOverlapIdx ] ) + ": " + str( twoOverlaps ) )
+                cell_report_data.append( "Overlap with State " + str( stateData[ finOverlapIdx ] ) + ": " + str( len( twoOverlaps ) ) + str( twoOverlaps ) )
         cell_report_data.append( "" )
 
     cell_report_data.append( "-------------------------------------------------------" )
@@ -177,7 +175,6 @@ def exit_handler():
     # plotting the points
     plt.plot( graphXTimeSteps, graphY1NumActiveCells, label = "# Active F-Cells" )
     plt.plot( graphXTimeSteps, graphY2AvgNumSegs, label = "Average # Segments Per Cell" )
-    plt.plot( graphXTimeSteps, graphY3StabilityScore, label = "StabilityScore of Working Memory" )
     # naming the x axis
     plt.xlabel('Time Steps')
     # naming the y axis
