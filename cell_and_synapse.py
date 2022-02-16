@@ -495,3 +495,103 @@ class OCell:
                     greatestOverlapScore = seg.lastOverlapScore
 
         return greatestOverlapScore
+
+# ------------------------------------------------------------------------------
+
+class WorkingMemory:
+
+    def __init__( self ):
+    # Setup working memory.
+
+        self.entrySDR  = []
+        self.entryPos  = []
+        self.entrySame = []
+        self.entryTime = []
+
+    def __repr__( self ):
+    # Returns properties of this class as a string.
+
+        stringReturn = ""
+
+        for entryIdx in range( len( self.entrySDR ) ):
+            stringReturn = ( stringReturn + "Entry #" +
+                str( entryIdx ) + " - Pos: " + str( self.entryPos[ entryIdx ] ) +
+                " - SDR: " + str( self.entrySDR[ entryIdx ] ) +
+                " - Time: " + str( self.entryTime[ entryIdx ] ) +
+                " - Same: " + str( self.entrySame[ entryIdx ] ) + "\n" )
+
+        return stringReturn
+
+    def ReturnStabilityScore( self ):
+    # Returns the percentage of entries that are labelled as same.
+
+        if len( self.entrySame ) > 0:
+            numSame = 0
+            for entry in self.entrySame:
+                if entry:
+                    numSame += 1
+            return int( numSame * 100 / len( self.entrySame ) )
+        else:
+            return 0
+
+    def UpdateVector( self, vector ):
+    # Use the vector to update all vectors stored in workingMemory items, and add timeStep.
+
+        if len( self.entrySDR ) > 0:
+            if len( vector ) != len( self.entryPos[ 0 ] ):
+                print( "Vectors sent to working memory of wrong size." )
+                exit()
+
+            for index in range( len( self.entrySDR ) ):
+                for x in range( len( self.entryPos[ index ] ) ):
+                    self.entryPos[ index ][ x ] += vector[ x ]
+
+    def UpdateEntries( self, winnerCells, maxTimeSinceActive, maxCellsPerEntry, checkRange ):
+    # If any item in working memory is above threshold time steps then remove it.
+    # Add the new active Fcells to working memory at the 0-vector location.
+
+        entryToDelete = []
+
+        zeroEntryExists = False
+        for entryIdx in range( len( self.entrySDR ) ):
+            # Check the entry at the zero location if it overlaps with winnerCells.
+            if CheckInside( [ 0, 0 ], self.entryPos[ entryIdx ], checkRange ):
+                # Update the SDR entry at the zero location.
+# LATER WE SHOULD INCLUDE UPDATING THE ENTRY BUT FOR NOW JUST CHANGE IT TO GIVEN WINNERCELLS.
+                self.entrySDR[ entryIdx ]  = winnerCells.copy()
+                self.entryTime[ entryIdx ] = 0
+                zeroEntryExists            = True
+
+            # Update time step.
+            self.entryTime[ entryIdx ] += 1
+            if self.entryTime[ entryIdx ] > maxTimeSinceActive:
+                NoRepeatInsort( entryToDelete, entryIdx )
+
+        # If there is no entry at zero location then create one.
+        if not zeroEntryExists:
+            self.entrySDR.append( winnerCells )
+            self.entryPos.append( [ 0, 0] )
+            self.entrySame.append( False )
+            self.entryTime.append( 0 )
+
+        # Delete items whose timeStep is above threshold.
+        if len( entryToDelete ) > 0:
+            for toDel in reversed( entryToDelete ):
+                del self.entrySDR[ toDel ]
+                del self.entryPos[ toDel ]
+                del self.entrySame[ toDel ]
+                del self.entryTime[ toDel ]
+
+    def SDROfEntry( self, checkPosition, checkRange, checkCells, checkSDRThreshold ):
+    # Checks the checkPosition and checkCells against entries in working memory. If one is found that matches return the SDR.
+
+        for entryIdx in range( len( self.entrySDR ) ):
+            if CheckInside( [ 0, 0 ], self.entryPos[ entryIdx ], checkRange ):
+                if len( FastIntersect( checkCells, self.entrySDR[ entryIdx ] ) ) >= checkSDRThreshold:
+                    # If it matches then we mark it as a stable entry for later.
+                    self.entrySame[ entryIdx ] = True
+                    return self.entrySDR[ entryIdx ]
+                else:
+                    self.entrySame[ entryIdx ] = False
+
+        return []

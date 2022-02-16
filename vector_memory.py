@@ -1,6 +1,6 @@
 from random import sample, randrange
 from operator import add
-from cell_and_synapse import FCell, OCell, BinarySearch, IndexIfItsIn, NoRepeatInsort, RepeatInsort, CheckInside, FastIntersect
+from cell_and_synapse import FCell, OCell, WorkingMemory, BinarySearch, IndexIfItsIn, NoRepeatInsort, RepeatInsort, CheckInside, FastIntersect
 import numpy as np
 from time import time
 
@@ -51,9 +51,7 @@ class VectorMemory:
             self.OCells.append( OCell() )
         self.activeOCells = []
 
-        self.lastActiveColumns = []
-
-        self.workingMemory = []
+        self.workingMemory = WorkingMemory()
 
     def SendData( self, stateNumber ):
     # Return the active FCells as a list.
@@ -103,7 +101,8 @@ class VectorMemory:
                 predictedFCells.append( index )
         log_data.append( "Predicted Cells: " + str( len( predictedFCells ) ) + ", " + str( predictedFCells ) )
 
-        log_data.append( "Working Memory: " + str( self.workingMemory ) )
+        log_data.append( "Working Memory Entries: " + str( self.workingMemory ) )
+        log_data.append( "Working Memory Stability Score: " + str( self.workingMemory.ReturnStabilityScore() ) )
 
     def ActivateFCells( self ):
     # Uses activated columns and cells in predicted state to put cells in active states.
@@ -169,15 +168,12 @@ class VectorMemory:
         # Select the winner cells for all bursting columns.
         # First check the current active cells against working memory entry for overlap. If there's a high enough overlap then
         # we use the working memory as winner cells. If not then we choose winner cells randomly.
-        inWorkingMem = -1
-        if len( self.workingMemory ) > 0:
-            for wmIndex, item in enumerate( self.workingMemory ):
-                if CheckInside( [ 0, 0 ], item[ 1 ], self.initialPosVariance ) and len( FastIntersect( self.activeFCells, item[ 0 ] ) ) >= self.FActivationThresholdMax :
-                    inWorkingMem = wmIndex
+        inWorkingMem = self.workingMemory.SDROfEntry( [ 0, 0 ], self.initialPosVariance, self.activeFCells, self.FActivationThresholdMax )
+
         for col in self.burstingCols:
             theCell = -1
             for cell in range( col * self.FCellsPerColumn, ( col * self.FCellsPerColumn ) + self.FCellsPerColumn ):
-                if inWorkingMem != -1 and BinarySearch( self.workingMemory[ inWorkingMem ][ 0 ], cell ):
+                if len( inWorkingMem ) > 0 and BinarySearch( inWorkingMem, cell ):
                     theCell = cell
 
             if theCell == -1:
@@ -262,44 +258,6 @@ class VectorMemory:
 #        for lActOCell in self.lastActiveOCells:
 #            self.FCells[ lActOCell ].OCellConnect( allActiveOCells, self.permanenceIncrement, self.permanenceDecrement )
 
-    def UpdateWorkingMemoryVector( self, vector ):
-    # Use the vector to update all vectors stored in workingMemory items, and add timeStep.
-
-        if len( self.workingMemory ) > 0:
-            for index in range( len( self.workingMemory ) ):
-                # Update vector.
-                self.workingMemory[ index ][ 1 ][ 0 ] += vector[ 0 ]
-                self.workingMemory[ index ][ 1 ][ 1 ] += vector[ 1 ]
-
-    def UpdateWorkingMemoryEntry( self ):
-    # If any item in working memory is above threshold time steps then remove it.
-    # Add the new active Fcells to working memory at the 0-vector location.
-
-        if len( self.workingMemory ) > 0:
-
-            workingMemoryToDelete = []
-
-            for index in range( len( self.workingMemory ) ):
-
-# WILL HAVE TO WORK ON WORKING MEMORY TO MAKE IT MORE PRECISE. FOR EXAMPLE UPDATING VECTOR AT ZERO INSTEAD OF DELETING.
-                # Delete the entry at the 0-vector location.
-                if self.workingMemory[ index ][ 1 ][ 0 ] == 0 and self.workingMemory[ index ][ 1 ][ 1 ] == 0:
-                    workingMemoryToDelete.insert( 0, index )
-
-                # Update time step.
-                self.workingMemory[ index ][ 2 ] += 1
-
-                if self.workingMemory[ index ][ 2 ] > self.segmentDecay:
-                    NoRepeatInsort( workingMemoryToDelete, index )
-
-            # Delete items whose timeStep is above threshold.
-            if len( workingMemoryToDelete ) > 0:
-                for toDel in reversed( workingMemoryToDelete ):
-                    del self.workingMemory[ toDel ]
-
-        # Add active winner cells to working memory, with zero vector (since we're there), and no time steps.
-        self.workingMemory.append( [ self.winnerFCells, [ 0, 0 ], 0 ] )
-
     def PredictFCells( self, vector ):
     # Clear old predicted FCells and generate new predicted FCells.
         # Get a bool list of all active and not active FCells.
@@ -327,7 +285,7 @@ class VectorMemory:
             exit()
 
         # Update working memory entry at this location.
-        self.UpdateWorkingMemoryVector( lastVector )
+        self.workingMemory.UpdateVector( lastVector )
 
         # Clear old active cells and get new ones active cells for this time step.
         self.ActivateFCells()
@@ -341,7 +299,7 @@ class VectorMemory:
                 lastWinnerCells.append( index )
 
         # Update working memory entry at this location.
-        self.UpdateWorkingMemoryEntry()
+        self.workingMemory.UpdateEntries( self.winnerFCells, self.segmentDecay, self.maxSynapsesPerSegment, self.initialPosVariance )
 
         # Use the active FCells to tell us what OCells to activate.
         self.ActivateOCells()
@@ -353,7 +311,5 @@ class VectorMemory:
                 self.maxSynapsesToAddPer, self.maxSynapsesPerSegment, self.FCellsPerColumn, self.equalityThreshold )
 
 #            self.OCellLearning()
-
-        self.lastActiveColumns = self.columnSDR
 
         return None
