@@ -68,22 +68,24 @@ class AgentOrange:
             columnDimensions          = 2048,
             cellsPerColumn            = 4,
             numObjectCells            = 1000,
-            FActivationThresholdMin   = 15,
-            FActivationThresholdMax   = 20,
+            FActivationThresholdMin   = 25,
+            FActivationThresholdMax   = 30,
             initialPermanence         = 0.3,
             lowerThreshold            = 0.1,
-            permanenceIncrement       = 0.1,
-            permanenceDecrement       = 0.05,
+            permanenceIncrement       = 0.04,
+            permanenceDecrement       = 0.005,
             permanenceDecay           = 0.001,
-            segmentDecay              = 10000,
+            segmentDecay              = 2000,
             initialPosVariance        = 10,
             OActivationThreshold      = 13,
-            ObjectRepActivaton        = 25,
+            objectRepActivation       = 25,
             maxSynapsesToAddPer       = 5,
             maxSegmentsPerCell        = 32,
             maxSynapsesPerSegment     = 50,
             equalityThreshold         = 30,
-            pctAllowedOCellConns      = 0.8
+            pctAllowedOCellConns      = 0.8,
+            WMStabilityThreshold      = 3,
+            spatialDimensions         = 2
         )
 
         self.lastVector = [ 0, 0 ]
@@ -112,10 +114,10 @@ class AgentOrange:
 
         return log_data
 
-    def SendStateData( self, stateNumber ):
+    def SendStateData( self, stateNumber, stateColour ):
     # Get the active cells from vp
 
-        return self.vp.SendData( stateNumber )
+        return self.vp.SendData( stateNumber, stateColour )
 
     def GetStateData( self ):
     # Get the state data from vp.

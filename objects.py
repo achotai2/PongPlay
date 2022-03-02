@@ -64,7 +64,8 @@ log_file.close()
 
 stateData             = []
 graphY1NumActiveCells = []
-graphY2AvgNumSegs     = []
+graphY2NumSegs        = []
+graphY3NumPredicCells = []
 graphXTimeSteps       = []
 
 def WriteDataToFiles( timeStep ):
@@ -100,12 +101,13 @@ def AccumulateReportData( timeStep, boxColour ):
     if stateIndex == len( stateData ):
         stateData.append( [ 1, sensePosX, sensePosY, boxColour ] )
 
-    Agent1.SendStateData( stateIndex )
+    Agent1.SendStateData( stateIndex, boxColour )
 
     # Data for graph.
-    numActiveCells, averageActiveSegs = Agent1.GetGraphData()
+    numActiveCells, numActiveSegs, numPredictedCells = Agent1.GetGraphData()
     graphY1NumActiveCells.append( numActiveCells )
-    graphY2AvgNumSegs.append( averageActiveSegs )
+    graphY2NumSegs.append( numActiveSegs )
+    graphY3NumPredicCells.append( numPredictedCells )
     graphXTimeSteps.append( timeStep )
 
 def exit_handler():
@@ -119,16 +121,21 @@ def exit_handler():
     log_file.close()
 
     # --------- Prepare Cell-Report and collect individual cell data. ---------
-    cell_report_data = []
-    cell_report_data.append( start_date_and_time_string )
-    cell_report_data.append( "-------------------------------------------------------" )
-    cellData = Agent1.GetStateData()
+    fCellData, oCellData = Agent1.GetStateData()
+
+    fcell_report_data = []
+    fcell_report_data.append( start_date_and_time_string )
+    fcell_report_data.append( "-------------------------------------------------------" )
+
+    ocell_report_data = []
+    ocell_report_data.append( start_date_and_time_string )
+    ocell_report_data.append( "-------------------------------------------------------" )
 
     # Prepare data for state part of report.
     minAcceptablePercentage = 50        # The minimal percent times a cell fires with a state to be considered.
 
     finalStateCollection = [ [] for i in range( len( stateData ) ) ]
-    for cellIdx, cell in enumerate( cellData ):
+    for cellIdx, cell in enumerate( fCellData ):
         for lookingInIndex in range( 1, len( cell ) ):
             stateIdx    = cell[ lookingInIndex ][ 0 ]
             stateCount  = cell[ lookingInIndex ][ 1 ]
@@ -137,50 +144,65 @@ def exit_handler():
                 finalStateCollection[ stateIdx ].append( ( cellIdx, countPct ) )
 
     for finIdx, item in enumerate( finalStateCollection ):
-        cell_report_data.append( "State: " + str( stateData[ finIdx ] ) )
-        cell_report_data.append( "Cells Active In State: " + str( sorted( item, key = lambda item: item[ 1 ], reverse = True ) ) )
+        fcell_report_data.append( "State: " + str( stateData[ finIdx ] ) )
+        fcell_report_data.append( "Cells Active In State: " + str( len( item ) ) + ", " + str( sorted( item, key = lambda item: item[ 1 ], reverse = True ) ) )
 
         itemsCells = [ i[ 0 ] for i in item ]
         for finOverlapIdx, itemOverlap in enumerate( finalStateCollection ):
             if finOverlapIdx != finIdx:
                 itemOverlapsCells = [ j[ 0 ] for j in itemOverlap ]
                 twoOverlaps       = [ value for value in itemsCells if value in itemOverlapsCells ]
-                cell_report_data.append( "Overlap with State " + str( stateData[ finOverlapIdx ] ) + ": " + str( len( twoOverlaps ) ) + str( twoOverlaps ) )
-        cell_report_data.append( "" )
+                fcell_report_data.append( "Overlap with State " + str( stateData[ finOverlapIdx ] ) + ": " + str( len( twoOverlaps ) ) + ", " + str( twoOverlaps ) )
+        fcell_report_data.append( "" )
 
-    cell_report_data.append( "-------------------------------------------------------" )
+    fcell_report_data.append( "-------------------------------------------------------" )
 
     # Prepare data for individual cell part of report.
-    cell_report_data.append( "- \t Cell ID \t # Times Active \t ( State active in, % times active ) -" )
-    sortedCellIndex = sorted( range( len( cellData ) ), key = lambda k: cellData[ k ], reverse = True )
+    fcell_report_data.append( "- \t Cell ID \t # Times Active \t ( State active in, % times active ) -" )
+    sortedCellIndex = sorted( range( len( fCellData ) ), key = lambda k: fCellData[ k ], reverse = True )
     for cell in sortedCellIndex:
         state_data_str = ""
-        thisCellData = cellData[ cell ]
+        thisfCellData = fCellData[ cell ]
         entryIndex = 1
-        while entryIndex < len( thisCellData ):
-            state_data_str += "( " + str( [ stateData[ thisCellData[ entryIndex ][ 0 ] ][ i ] for i in range( 1, len( stateData[ thisCellData[ entryIndex ][ 0 ] ] ) ) ] ) + ", " + str( int( thisCellData[ entryIndex ][ 1 ] / stateData[ thisCellData[ entryIndex ][ 0 ] ][ 0 ] * 100 ) ) + "% ), "
+        while entryIndex < len( thisfCellData ):
+            state_data_str += "( " + str( [ stateData[ thisfCellData[ entryIndex ][ 0 ] ][ i ] for i in range( 1, len( stateData[ thisfCellData[ entryIndex ][ 0 ] ] ) ) ] ) + ", " + str( int( thisfCellData[ entryIndex ][ 1 ] / stateData[ thisfCellData[ entryIndex ][ 0 ] ][ 0 ] * 100 ) ) + "% ), "
             entryIndex += 1
-        cell_report_data.append( "\t" + str( cell ) + "\t\t\t" + str( thisCellData[ 0 ] ) + "\t\t" + state_data_str )
+        fcell_report_data.append( "\t" + str( cell ) + "\t\t\t" + str( thisfCellData[ 0 ] ) + "\t\t" + state_data_str )
 
-    # Write data into Cell-Report
-    cell_report_data.append( "\n" + "Program End Time: " + str( datetime.datetime.now() ) )
-    cell_report_file_name =  "Logs/" + start_date_and_time_string + "/Cell-Report" + ".txt"
-    cell_report_file = open( cell_report_file_name, 'w' )
-    for line in cell_report_data:
-        cell_report_file.write( line )
-        cell_report_file.write( "\n" )
-    cell_report_file.close()
+    # Write data into F-Cell-Report
+    fcell_report_data.append( "\n" + "Program End Time: " + str( datetime.datetime.now() ) )
+    fcell_report_file_name =  "Logs/" + start_date_and_time_string + "/F-Cell-Report" + ".txt"
+    fcell_report_file = open( fcell_report_file_name, 'w' )
+    for line in fcell_report_data:
+        fcell_report_file.write( line )
+        fcell_report_file.write( "\n" )
+    fcell_report_file.close()
+
+    # Prepare the OCell Report data.
+    oCellData.sort(key = lambda oCellData: oCellData[ 0 ] )
+    for entryIndex, entry in enumerate( oCellData ):
+        ocell_report_data.append( str( entry[ 0 ] ) + ": " + str( entry[ 1 ] ) )
+
+    # Write data into O-Cell-Report
+    ocell_report_data.append( "\n" + "Program End Time: " + str( datetime.datetime.now() ) )
+    ocell_report_file_name =  "Logs/" + start_date_and_time_string + "/O-Cell-Report" + ".txt"
+    ocell_report_file = open( ocell_report_file_name, 'w' )
+    for line in ocell_report_data:
+        ocell_report_file.write( line )
+        ocell_report_file.write( "\n" )
+    ocell_report_file.close()
 
     # --------- Plot the graph. ----------------
     # plotting the points
+#    plt.plot( graphXTimeSteps, graphY2NumSegs, label = "# Active Segments" )
+    plt.plot( graphXTimeSteps, graphY3NumPredicCells, label = "# Predicted F-Cells" )
     plt.plot( graphXTimeSteps, graphY1NumActiveCells, label = "# Active F-Cells" )
-    plt.plot( graphXTimeSteps, graphY2AvgNumSegs, label = "Average # Segments Per Cell" )
     # naming the x axis
     plt.xlabel('Time Steps')
     # naming the y axis
     plt.ylabel('# of Active')
     # giving a title to my graph
-    plt.title('# F-Cells Over Time')
+    plt.title('Data Over Time')
     plt.legend()
     # function to show the plot
     plt.savefig( "Logs/" + start_date_and_time_string + "/Plot_Data.png" )
