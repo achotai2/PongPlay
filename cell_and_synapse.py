@@ -1,5 +1,5 @@
 from bisect import bisect_left
-from random import uniform, choice, sample
+from random import uniform, choice, sample, randrange
 #import numpy as np
 from time import time
 
@@ -87,16 +87,86 @@ def FastIntersect( list1, list2 ):
 
     return intersection
 
+def ModThisSynapse( currentValue, howMuch, notIfOne ):
+# Modify the synapse value and do checks, then return new value.
+
+    newValue = currentValue
+
+    if ( notIfOne and newValue == 1.0 ) or ( newValue == 0.0 and howMuch < 0.0 ):
+        return newValue
+
+    newValue += howMuch
+
+    if newValue > 1.0:
+        newValue = 1.0
+    elif newValue < 0.0:
+        newValue = 0.0
+
+    return newValue
+
+def GenerateUnitySDR( SDRList, maxReturnSDRSize, cellsPerColumn ):
+# Given a list of SDRs generate a new list of requested size by choosing the most frequent cells, and random otherwise.
+# This function assumes the SDRs are sorted lists, and each cell can only appear once.
+
+    returnSDR = []
+    cellsList = []
+    countList = []
+
+    # Go through SDRs and count occurrances of each cell.
+    for SDR in SDRList:
+        for cell in SDR:
+            # First check if cell is in list already.
+            i = bisect_left( cellsList, cell )
+
+            # If it is then add to its count.
+            if i != len( cellsList ) and cellsList[ i ] == cell:
+                countList[ i ] += 1
+
+            # If not then add it.
+            else:
+                cellsList.insert( i, cell )
+                countList.insert( i, 1 )
+
+    # Once we have the counts, arrange the cells by their count.
+    sortedCells = []
+    for x in range( len( SDRList ) ):
+        sortedCells.append( [] )
+    for index, cell in enumerate( cellsList ):
+        sortedCells[ countList[ index ] - 1 ].append( cell )
+
+    while len( returnSDR ) < maxReturnSDRSize:
+        chosenCell = None
+        for c in reversed( range( len( SDRList ) ) ):
+            if len( sortedCells[ c ] ) > 0:
+                chosenCell = sortedCells[ c ].pop( randrange( 0, len( sortedCells[ c ] ) ) )
+                break
+        if chosenCell == None:
+            print( "Something went wrong in GenerateUnitySDR()" )
+            exit()
+
+        i = bisect_left( returnSDR, chosenCell )
+        # Don't add the cell if we already have one from the same column.
+        if i == len( returnSDR ):
+            if i == 0 or int( returnSDR[ i - 1 ] / cellsPerColumn ) != int( chosenCell / cellsPerColumn ):
+                returnSDR.append( chosenCell )
+        elif int( returnSDR[ i ] / cellsPerColumn ) != int( chosenCell / cellsPerColumn ):
+            if i == 0 or int( returnSDR[ i - 1 ] / cellsPerColumn ) != int( chosenCell / cellsPerColumn ):
+                returnSDR.insert( i, chosenCell )
+
+    return returnSDR
+
 #-------------------------------------------------------------------------------
 
 class Segment:
 
-    def __init__( self, dimensions, incidentCellsList, terminalCell, vector, posRange, initialActivationThreshold ):
+    def __init__( self, dimensions, incidentCellsList, terminalCell, vector, vectorCells, initialActivationThreshold,
+        initialPermanence, permanenceIncrement, permanenceDecay, numVectorSynapses, vectorRange, vectorSynapseScaleFactor ):
     # Initialize the inidividual segment structure class.
 
         self.active              = True                         # True means it's predictive, and above threshold terminal cells fired.
         self.timeSinceActive     = 0                            # Time steps since this segment was active last.
         self.activationThreshold = initialActivationThreshold   # Minimum overlap required to activate segment.
+        self.activeAboveThresh   = False
 
         # Synapse portion.
         self.incidentSynapses    = incidentCellsList.copy()
@@ -106,16 +176,84 @@ class Segment:
 
         # Vector portion.
         self.dimensions = dimensions         # Number of dimensions vector positions will be in.
-        self.vector     = []                 # A list of tuples, one for each dimension, with a range for location.
-        for i in range( self.dimensions ):
-            self.vector.append( ( vector[ i ] - posRange / 2, vector[ i ] + posRange / 2 ) )
+        self.numVectorSynapses = numVectorSynapses
+        self.vectorSynapseScaleFactor = vectorSynapseScaleFactor
+        self.vectorRange       = []
+        for d in range( self.dimensions ):
+            self.vectorRange.append( [ -vectorRange, vectorRange ] )
+        self.permanenceIncrement = permanenceIncrement
+        self.permanenceDecay     = permanenceDecay
+
+        if vector != None:
+            if len( vector ) != dimensions:
+                print( "Vector sent to create segment not of same dimensions sent." )
+                exit()
+
+            self.vectorSynapses = []
+# MIGHT NEED TO ADD A SCALE FUNCTION, AND RANGE FUNCTION INTO THIS LATER.
+            for x in range( self.dimensions ):
+                thisDim = [ 0.0 ] * self.numVectorSynapses
+                self.vectorSynapses.append( thisDim )
+            for y in range( self.dimensions ):
+                self.ChangeVectorStrength( y, vector[ y ], initialPermanence )
+        else:
+            self.vectorSynapses = vectorCells
+
+    def GetVectorSynapseIndex( self, whichDim, position ):
+    # Returns the index in self.vectorSynapses for position.
+
+        if position < self.vectorRange[ whichDim ][ 0 ] or position > self.vectorRange[ whichDim ][ 1 ]:
+            print( "Sent position to GetVectorSynapseIndex() outside allowed range." )
+            exit()
+
+        rangeMin   = self.vectorRange[ whichDim ][ 0 ]
+        rangeMax   = self.vectorRange[ whichDim ][ 1 ]
+        totalRange = rangeMax - rangeMin
+
+        return int( ( ( position - rangeMin ) / totalRange ) * self.numVectorSynapses )
+
+    def ChangeVectorStrength( self, whichDim, position, permanenceAdjust ):
+    # Modifies declared vector position by permanenceAdjust, and smooths this out.
+
+        synIndex = self.GetVectorSynapseIndex( whichDim, position )
+
+        synModif = 0
+        thisPermAdjust = permanenceAdjust
+        while synIndex + synModif < len( self.vectorSynapses[ whichDim ] ):
+            self.vectorSynapses[ whichDim ][ synIndex + synModif ] = ModThisSynapse( self.vectorSynapses[ whichDim ][ synIndex + synModif ], thisPermAdjust, True )
+            thisPermAdjust = thisPermAdjust * self.vectorSynapseScaleFactor
+            if thisPermAdjust < 0.01:
+                break
+            synModif += 1
+
+        synModif = 1
+        thisPermAdjust = permanenceAdjust * self.vectorSynapseScaleFactor
+        while synIndex - synModif >= 0:
+            self.vectorSynapses[ whichDim ][ synIndex - synModif ] = ModThisSynapse( self.vectorSynapses[ whichDim ][ synIndex - synModif ], thisPermAdjust, True )
+            thisPermAdjust = thisPermAdjust * self.vectorSynapseScaleFactor
+            if thisPermAdjust < 0.01:
+                break
+            synModif += 1
 
     def Inside( self, vector ):
     # Checks if given vector position is inside range.
 
+        if len( vector ) != self.dimensions:
+            print( "Vector sent to Inside() not of same dimensions as Segment." )
+            exit()
+
         for i in range( self.dimensions ):
-            if vector[ i ] < self.vector[ i ][ 0 ] or vector[ i ] > self.vector[ i ][ 1 ]:
+            synIndex = self.GetVectorSynapseIndex( i, vector[ i ] )
+            if self.vectorSynapses[ i ][ synIndex ] == 0.0:
                 return False
+
+        for x in range( self.dimensions ):
+            # Decay all synapses by a bit.
+            for syn in range( self.numVectorSynapses ):
+                self.vectorSynapses[ x ][ syn ] = ModThisSynapse( self.vectorSynapses[ x ][ syn ], -self.permanenceDecay, True )
+
+            # Increase the synapses around the vector position.
+            self.ChangeVectorStrength( x, vector[ x ], self.permanenceIncrement )
 
         return True
 
@@ -127,13 +265,24 @@ class Segment:
     def CheckActivation( self, vector ):
     # Checks the incidentActivation against activationThreshold to see if segment becomes active.
 
-        if self.Inside( vector ) and len( self.incidentActivation ) >= self.activationThreshold:
-            self.active = True
-            self.timeSinceActive = 0
-            return self.terminalSynapse
-        else:
-            self.active = False
-            return None
+        if len( self.incidentActivation ) >= self.activationThreshold:
+            self.activeAboveThresh = True
+
+            if self.Inside( vector ):
+                self.active = True
+                self.timeSinceActive = 0
+                return self.terminalSynapse
+
+        self.active = False
+        return None
+
+    def RefreshSegment( self ):
+    # Updates or refreshes the state of the segment.
+
+        self.active             = False
+        self.incidentActivation = []
+        self.timeSinceActive   += 1
+        self.activeAboveThresh  = False
 
     def RemoveIncidentSynapse( self, synapseToDelete ):
     # Delete the incident synapse sent.
@@ -168,23 +317,9 @@ class Segment:
         return False
 
     def Equality( self, other, equalityThreshold ):
-    # Runs the following comparison of equality: segment1 == segment2.
+    # Runs the following comparison of equality: segment1 == segment2, comparing their activation intersection, but not vector.
 
-        incidentEquality = 0
-
-        otherIndex       = 0
-        selfIndex        = 0
-
-        otherCenterVector = []
-        for dim1 in other.vector:
-            otherCenterVector.append( ( dim1[ 0 ] + dim1[ 1 ] / 2 ) )
-        selfCenterVector = []
-        for dim2 in self.vector:
-            selfCenterVector.append( ( dim2[ 0 ] + dim2[ 1 ] / 2 ) )
-
-        if ( self.dimensions == other.dimensions and self.Inside( otherCenterVector ) and other.Inside( selfCenterVector ) and
-            self.terminalSynapse == other.terminalSynapse and
-            len( FastIntersect( self.incidentSynapses, other.incidentSynapses ) ) > equalityThreshold ):
+        if self.terminalSynapse == other.terminalSynapse and len( FastIntersect( self.incidentSynapses, other.incidentSynapses ) ) > equalityThreshold:
             return True
         else:
             return False
@@ -200,20 +335,25 @@ class Segment:
 
         self.activationThreshold = ( ( minActivation - maxActivation ) * 2 ** ( -1 * numWinners ) ) + maxActivation
 
+    def ReturnVectorCells( self ):
+    # Returns the vector cell permanences as a list.
+
+        return self.vectorSynapses.copy()
+
 #-------------------------------------------------------------------------------
 
 class SegmentStructure:
 
-    def __init__( self, dimensions, initialPermanence, permanenceIncrement, permanenceDecrement, initialPosVariance,
+    def __init__( self, vectorDimensions, initialPermanence, permanenceIncrement, permanenceDecrement, permanenceDecay,
         activeThresholdMin, activeThresholdMax, incidentColumnDimensions, incidentCellsPerColumn, maxSynapsesToAddPer,
-        maxSynapsesPerSegment, maxTimeSinceActive, equalityThreshold ):
+        maxSynapsesPerSegment, maxTimeSinceActive, equalityThreshold, numVectorSynapses, vectorRange, vectorScaleFactor ):
     # Initialize the segment storage and handling class.
 
-        self.dimensions            = dimensions
+        self.dimensions            = vectorDimensions
         self.initialPermanence     = initialPermanence
         self.permanenceIncrement   = permanenceIncrement
         self.permanenceDecrement   = permanenceDecrement
-        self.initialPosVariance    = initialPosVariance
+        self.permanenceDecay       = permanenceDecay
         self.activeThresholdMin    = activeThresholdMin
         self.activeThresholdMax    = activeThresholdMax
         self.incCellsPerColumn     = incidentCellsPerColumn
@@ -221,6 +361,9 @@ class SegmentStructure:
         self.maxSynapsesPerSegment = maxSynapsesPerSegment
         self.maxTimeSinceActive    = maxTimeSinceActive
         self.equalityThreshold     = equalityThreshold
+        self.numVectorSynapses     = numVectorSynapses
+        self.vectorRange           = vectorRange
+        self.vectorScaleFactor     = vectorScaleFactor
 
         self.segments = []                                  # Stores all segments structures.
         self.activeSegments = []
@@ -285,10 +428,12 @@ class SegmentStructure:
                 # Delete the segment.
                 del self.segments[ segIndex ]
 
-    def CreateSegment( self, Cells, incidentCellsList, terminalCell, vector ):
+    def CreateSegment( self, Cells, incidentCellsList, terminalCell, vector, vectorCells ):
     # Creates a new segment.
 
-        newSegment = Segment( self.dimensions, [], terminalCell, vector, self.initialPosVariance, self.activeThresholdMin )
+        newSegment = Segment( self.dimensions, [], terminalCell, vector, vectorCells, self.activeThresholdMin,
+            self.initialPermanence, self.permanenceIncrement, self.permanenceDecay, self.numVectorSynapses,
+            self.vectorRange, self.vectorScaleFactor )
         self.segments.append( newSegment )
 
         indexOfNew = len( self.segments ) - 1
@@ -299,6 +444,32 @@ class SegmentStructure:
 
         Cells[ terminalCell ].isTerminalCell += 1
 
+    def UnifyVectors( self, vectorCellsList ):
+    # Use the list of vector cells contained in vectorCellsList and unify them into one by taking the max for each cell.
+
+        for entry in vectorCellsList:
+            if len( entry ) != self.dimensions:
+                print( "Dimensions of vectors sent to UnifyVectors() not of correct size." )
+                exit()
+            for cellList in entry:
+                if len( cellList ) != self.numVectorSynapses:
+                    print( "Number of cells in vectors sent to UnifyVectors() not of correct size." )
+                    exit()
+
+        newVectorCells = []
+        for dim in range( self.dimensions ):
+            newPermanences = []
+            for cell in range( self.numVectorSynapses ):
+                max = 0.0
+                for entry in vectorCellsList:
+                    if entry[ dim ][ cell ] > max:
+                        max = entry[ dim ][ cell ]
+
+                newPermanences.append( max )
+            newVectorCells.append( newPermanences )
+
+        return newVectorCells
+
     def UpdateSegmentActivity( self, segsToDelete ):
     # Make every segment that was active inactive, and refreshes its synapse activation.
     # Also add a time step to each segment, and see if it dies as a result. Delete any segments that die.
@@ -306,13 +477,11 @@ class SegmentStructure:
         self.activeSegments = []
 
         for index, segment in enumerate( self.segments ):
-            segment.active = False
-            segment.incidentActivation = []
-            segment.timeSinceActive += 1
+            segment.RefreshSegment()
             if segment.timeSinceActive > self.maxTimeSinceActive:
                 segsToDelete.append( index )
 
-    def SegmentLearning( self, Cells, lastWinnerCells, lastVector, doDecayCreate ):
+    def SegmentLearning( self, Cells, lastWinnerCells, doDecayCreate ):
     # Perform learning on all active and inactive segments.
     # Refresh all segments then perform learning on them.
     # Delete segments that need deleting.
@@ -325,7 +494,7 @@ class SegmentStructure:
 #        for actSeg in self.activeSegments:
 #            segment.AdjustThreshold( self.activeThresholdMin, self.activeThresholdMax )
 
-        self.CheckIfSegsIdentical( segsToDelete )
+        self.CheckIfSegsIdentical( Cells, segsToDelete )
 
         self.UpdateSegmentActivity( segsToDelete )
 
@@ -358,13 +527,10 @@ class SegmentStructure:
 
         entryIndex = IndexIfItsIn( self.incidentSegments[ incCell ], segIndex )
         if entryIndex != None:
-            self.incidentPermanences[ incCell ][ entryIndex ] += permanenceChange
+            self.incidentPermanences[ incCell ][ entryIndex ] = ModThisSynapse( self.incidentPermanences[ incCell ][ entryIndex ], permanenceChange, True )
 
             if self.incidentPermanences[ incCell ][ entryIndex ] <= 0.0:
                 self.DeleteSynapse( incCell, segIndex )
-
-            elif self.incidentPermanences[ incCell ][ entryIndex ] > 1.0:
-                self.incidentPermanences[ incCell ][ entryIndex ] = 1.0
 
     def DecayAndCreate( self, Cells, lastWinnerCells ):
     # For all active segments:
@@ -440,24 +606,43 @@ class SegmentStructure:
 
         return ( greatestCell, greatestActivation )
 
-    def CheckIfSegsIdentical( self, segsToDelete ):
-    # Compares all active segments to see if they have identical vectors and active synapse bundles.
-    # If any do then delete one of them.
+    def CheckIfSegsIdentical( self, Cells, segsToDelete ):
+    # Compares all segments to see if they have identical vectors or active synapse bundles. If any do then merge them.
+    # A.) Begin by checking which segments have an above threshold overlap activation.
+    # B.) Group these segments by forming a list of lists, where each entry is a grouping of segments.
+    #   Segments are grouped by first checking their terminal synapse against one, and then checking if their overlap is above equalityThreshold.
+    # C.) Then, if any entry has more than two segments in it, merge the two, and mark one of the segments for deletion.
 
-        if len( self.activeSegments ) > 1:
-            for index1 in range( len( self.activeSegments ) - 1 ):
-                for index2 in range( index1 + 1, len( self.activeSegments ) ):
-                    actSeg1 = self.activeSegments[ index1 ]
-                    actSeg2 = self.activeSegments[ index2 ]
+        segmentGroupings = []
 
-                    if self.segments[ actSeg1 ].Equality( self.segments[ actSeg2 ], self.equalityThreshold ):
-                        activation1 = self.ReturnActivation( actSeg1 )
-                        activation2 = self.ReturnActivation( actSeg2 )
+        for index, segment in enumerate( self.segments ):
+            if segment.activeAboveThresh:
+                chosenIndex = None
+                for entryIndex, entry in enumerate( segmentGroupings ):
+                    thisEntryMatches = True
+                    for entrySegment in entry:
+                        if not segment.Equality( self.segments[ entrySegment ], self.equalityThreshold ):
+                            thisEntryMatches = False
+                            break
+                    if thisEntryMatches:
+                        chosenIndex = entryIndex
+                        break
 
-                        if activation1 >= activation2:
-                            segsToDelete.append( actSeg2 )
-                        else:
-                            segsToDelete.append( actSeg1 )
+                if chosenIndex == None:
+                    segmentGroupings.append( [ index ] )
+                else:
+                    segmentGroupings[ chosenIndex ].append( index )
+
+        for group in segmentGroupings:
+            if len( group ) > 1:
+                SDRList     = [ self.segments[ group[ i ] ].incidentSynapses for i in range( len( group) ) ]
+                unitySDR    = GenerateUnitySDR( SDRList, len( SDRList[ 0 ] ), self.incCellsPerColumn )
+                unityVector = self.UnifyVectors( [ self.segments[ group[ k ] ].ReturnVectorCells() for k in range( len( group ) ) ] )
+
+                self.CreateSegment( Cells, unitySDR, self.segments[ group[ 0 ] ].terminalSynapse, None, unityVector )
+
+                for segIndex in range( len( group ) ):
+                    segsToDelete.append( group[ segIndex ] )
 
 # ------------------------------------------------------------------------------
 
@@ -558,7 +743,7 @@ class OCell:
 
 class WorkingMemory:
 
-    def __init__( self, overlapThreshold, initialPosVariance, FCellsPerColumn, maxTimeSinceActive, sameThreshold ):
+    def __init__( self, overlapThreshold, initialPosVariance, FCellsPerColumn, maxTimeSinceActive, sameThreshold, vectorDimensions ):
     # Setup working memory.
 
         self.entryColumnSDR  = []                   # The column input for each entry.
@@ -576,6 +761,7 @@ class WorkingMemory:
         self.sameThreshold      = sameThreshold
         self.FCellsPerColumn    = FCellsPerColumn
         self.maxTimeSinceActive = maxTimeSinceActive
+        self.vectorDimensions   = vectorDimensions
 
     def __repr__( self ):
     # Returns properties of this class as a string.
@@ -610,7 +796,7 @@ class WorkingMemory:
         # Check columnSDR
         self.thisEntryIndex = None
         for entryIdx, entry in enumerate( self.entryColumnSDR ):
-            if CheckInside( [ 0, 0 ], self.entryPos[ entryIdx ], self.checkRange ):
+            if CheckInside( [ 0 for i in range( self.vectorDimensions ) ], self.entryPos[ entryIdx ], self.checkRange ):
                 self.thisEntryIndex = entryIdx
 
                 if len( FastIntersect( columnSDR, entry ) ) >= self.overlapThreshold:
@@ -623,7 +809,7 @@ class WorkingMemory:
             self.thisEntryIndex = len( self.entryColumnSDR )
             self.entryColumnSDR.append( columnSDR )
             self.entryCellSDR.append( [] )
-            self.entryPos.append( [ 0, 0 ] )
+            self.entryPos.append( [ 0 for i in range( self.vectorDimensions ) ] )
             self.entryTime.append( 0 )
             self.unityCellSDR.append( [] )
 
@@ -643,11 +829,10 @@ class WorkingMemory:
                     break
 
         # Update unityCellSDR.
-# FOR NOW UNITY WILL JUST BE THE LAST ENTRY CELL SDR.
         self.unityCellSDR = []
         for entry in self.entryCellSDR:
             if len( entry ) > 0:
-                self.unityCellSDR.append( entry[ -1 ] )
+                self.unityCellSDR.append( GenerateUnitySDR( entry, len( columnSDR ), self.FCellsPerColumn ) )
             else:
                 self.unityCellSDR.append( [] )
 

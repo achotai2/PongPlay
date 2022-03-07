@@ -27,7 +27,7 @@ def Within ( value, minimum, maximum, equality ):
 
 class AgentOrange:
 
-    def __init__( self, name, resX, resY ):
+    def __init__( self, name, resX, resY, spatialDimensions, otherDimensions ):
 
         self.ID = name
 
@@ -35,7 +35,7 @@ class AgentOrange:
         self.resolutionY = resY
 
         # Set up encoder parameters
-        colourEncodeParams    = ScalarEncoderParameters()
+        colourEncodeParams = ScalarEncoderParameters()
 
         colourEncodeParams.activeBits = 5
         colourEncodeParams.radius     = 1
@@ -85,11 +85,18 @@ class AgentOrange:
             equalityThreshold         = 30,
             pctAllowedOCellConns      = 0.8,
             WMStabilityThreshold      = 3,
-            spatialDimensions         = 2
+            vectorDimensions          = spatialDimensions + otherDimensions,
+            numVectorSynapses         = 500,
+            vectorRange               = 800,
+            vectorScaleFactor         = 0.8
         )
 
-        self.lastVector = [ 0, 0 ]
-        self.newVector  = [ 0, 0 ]
+        self.lastVector = []
+        self.newVector  = []
+        for i in range( spatialDimensions + otherDimensions ):
+            self.lastVector.append( 0 )
+            self.newVector.append( 0 )
+        self.lastColour = 1
 
         # Stats for end report.
         self.top_left     = []
@@ -213,6 +220,7 @@ class AgentOrange:
         # Compute cell activation and generate next predicted cells.
         vpDesiredNewVector = self.vp.Compute( senseSDR, self.lastVector )
 
+        # Generate random motion of the sense organ.
         if vpDesiredNewVector == None:
             whichPos = randrange( 4 )
             chosePos = [ 100, 100 ]
@@ -230,12 +238,18 @@ class AgentOrange:
                 chosePos[ 1 ] = -100
             self.newVector[ 0 ] = chosePos[ 0 ] - sensePosX
             self.newVector[ 1 ] = chosePos[ 1 ] - sensePosY
+
+            # Append on the colour portion of the vector.
+            colourVector = objC - self.lastColour
+            self.newVector[ 2 ] = colourVector * 100
+            self.lastColour = objC
+
         elif len( vpDesiredNewVector ) != len( self.newVector ):
             print( "VP outputting vector of wrong dimensions." )
             exit()
         else:
-            self.newVector[ 0 ] = vpDesiredNewVector[ 0 ]
-            self.newVector[ 1 ] = vpDesiredNewVector[ 1 ]
+            for i in range( len( self.newVector ) ):
+                self.newVector[ i ] = vpDesiredNewVector[ i ]
 
         # Use FSegments to predict next set of inputs (put the cells into predictive states), given newVector.
         self.vp.PredictFCells( self.newVector )

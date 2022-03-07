@@ -49,7 +49,7 @@ senseOrgan.penup()
 senseOrgan.goto( sensePosX, sensePosY )
 
 # Create agent------------------------------------------------------------------
-Agent1 = AgentOrange( 'Agent', senseResX, senseResY )
+Agent1 = AgentOrange( 'Agent', senseResX, senseResY, 2, 1 )
 
 # Prepare log and report files--------------------------------------------------
 timeStep = 0
