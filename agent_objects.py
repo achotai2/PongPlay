@@ -76,6 +76,7 @@ class AgentOrange:
             permanenceDecrement       = 0.005,
             permanenceDecay           = 0.001,
             segmentDecay              = 2000,
+            WMEntryDecay              = 25,
             initialPosVariance        = 10,
             OActivationThreshold      = 13,
             objectRepActivation       = 25,
@@ -85,15 +86,16 @@ class AgentOrange:
             equalityThreshold         = 30,
             pctAllowedOCellConns      = 0.8,
             WMStabilityThreshold      = 3,
-            vectorDimensions          = spatialDimensions + otherDimensions,
+            vectorDimensions          = spatialDimensions,
             numVectorSynapses         = 500,
             vectorRange               = 800,
-            vectorScaleFactor         = 0.8
+            vectorScaleFactor         = 0.8,
+            WMStabilityPct            = 1.0
         )
 
         self.lastVector = []
         self.newVector  = []
-        for i in range( spatialDimensions + otherDimensions ):
+        for i in range( spatialDimensions ):
             self.lastVector.append( 0 )
             self.newVector.append( 0 )
         self.lastColour = 1
@@ -240,9 +242,9 @@ class AgentOrange:
             self.newVector[ 1 ] = chosePos[ 1 ] - sensePosY
 
             # Append on the colour portion of the vector.
-            colourVector = objC - self.lastColour
-            self.newVector[ 2 ] = colourVector * 100
-            self.lastColour = objC
+#            colourVector = objC - self.lastColour
+#            self.newVector[ 2 ] = colourVector * 100
+#            self.lastColour = objC
 
         elif len( vpDesiredNewVector ) != len( self.newVector ):
             print( "VP outputting vector of wrong dimensions." )

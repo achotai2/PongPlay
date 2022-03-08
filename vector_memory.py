@@ -1,16 +1,18 @@
 from random import sample, randrange
 from operator import add
-from cell_and_synapse import FCell, OCell, WorkingMemory, SegmentStructure, BinarySearch, IndexIfItsIn, NoRepeatInsort, RepeatInsort, CheckInside, FastIntersect
+from cell_and_synapse import FCell, OCell, SegmentStructure
+from working_memory import WorkingMemory
+from useful_functions import NoRepeatInsort
 #import numpy as np
 #from time import time
 
 class VectorMemory:
 
     def __init__( self, columnDimensions, cellsPerColumn, numObjectCells, FActivationThresholdMin, FActivationThresholdMax,
-        initialPermanence, lowerThreshold, permanenceIncrement, permanenceDecrement, permanenceDecay, segmentDecay,
+        initialPermanence, lowerThreshold, permanenceIncrement, permanenceDecrement, permanenceDecay, segmentDecay, WMEntryDecay,
         initialPosVariance, objectRepActivation, OActivationThreshold, maxSynapsesToAddPer, maxSegmentsPerCell,
         maxSynapsesPerSegment, equalityThreshold, pctAllowedOCellConns , WMStabilityThreshold, vectorDimensions,
-        numVectorSynapses, vectorRange, vectorScaleFactor ):
+        numVectorSynapses, vectorRange, vectorScaleFactor, WMStabilityPct ):
 
         self.columnDimensions        = columnDimensions         # Dimensions of the column space.
         self.FCellsPerColumn         = cellsPerColumn           # Number of cells per column.
@@ -24,6 +26,7 @@ class VectorMemory:
         self.permanenceDecrement     = permanenceDecrement      # Amount by which permanences of synapses are decremented during learning.
         self.permanenceDecay         = permanenceDecay          # Amount to decay permances each time step if < 1.0.
         self.segmentDecay            = segmentDecay             # If a segment hasn't been active in this many time steps then delete it.
+        self.WMEntryDecay            = WMEntryDecay             # The time entries in working memory stay before being deleted if inactive.
         self.initialPosVariance      = initialPosVariance       # Amount of range vector positions are valid in.
         self.objectRepActivation     = objectRepActivation       # Number of active OCells in object layer at one time.
         self.OActivationThreshold    = OActivationThreshold     # Threshold of active connected OToFSynapses...
@@ -38,6 +41,7 @@ class VectorMemory:
         self.numVectorSynapses       = numVectorSynapses        # The number of vector synapses in segments.
         self.vectorRange             = vectorRange              # The initial total range of vector views in segments.
         self.vectorScaleFactor       = vectorScaleFactor        # The adjustment of vector permanences in segments off-center.
+        self.WMStabilityPct          = WMStabilityPct           # The percent of stable entries for working memory to be stable.
 
         # Create column SDR storage.
         self.columnSDR       = []
@@ -76,7 +80,7 @@ class VectorMemory:
             maxSynapsesToAddPer, maxSynapsesPerSegment, segmentDecay, equalityThreshold, numVectorSynapses, vectorRange, vectorScaleFactor )
 
 
-        self.workingMemory = WorkingMemory( FActivationThresholdMax, initialPosVariance, cellsPerColumn, segmentDecay, WMStabilityThreshold, vectorDimensions )
+        self.workingMemory = WorkingMemory( FActivationThresholdMax, initialPosVariance, cellsPerColumn, WMEntryDecay, WMStabilityThreshold, WMStabilityPct, vectorDimensions )
 
     def SendData( self, stateNumber, stateColour ):
     # Return the active FCells as a list.
@@ -294,9 +298,10 @@ class VectorMemory:
         self.FToFSegmentStruct.SegmentLearning( self.FCells, self.lastWinnerFCells, True )
 
         # If working memory stability changed then modify OCell states.
-        if stableBefore and not stableAfter:
+        if stableAfter:
             self.RefreshOCells()
-        elif not stableBefore and stableAfter:
             self.ActivateOCells()
+        else:
+            self.RefreshOCells()
 
         return None

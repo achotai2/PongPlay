@@ -4,7 +4,6 @@ import datetime
 import os
 import matplotlib.pyplot as plt
 from bisect import bisect_left
-from cell_and_synapse import BinarySearch
 
 from agent_objects import AgentOrange
 
@@ -217,13 +216,13 @@ while True:
 
     timeStep += 1
 
-    if int( timeStep / 300 ) % 3 == 1:
+    if int( timeStep / 100 ) % 3 == 1:
         boxColour = 2
         box.color( "green" )
-    elif int( timeStep / 300 ) % 3 == 2:
+    elif int( timeStep / 100 ) % 3 == 2:
         boxColour = 3
         box.color( "blue" )
-    elif int( timeStep / 300 ) % 3 == 0:
+    elif int( timeStep / 100 ) % 3 == 0:
         boxColour = 1
         box.color( "red" )
 
