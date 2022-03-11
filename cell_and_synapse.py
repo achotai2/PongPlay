@@ -493,7 +493,7 @@ class SegmentStructure:
 
 class FCell:
 
-    def __init__( self, initialPermanence, numOCells, pctAllowedOCellConns, segmentDecay ):
+    def __init__( self ):
     # Create a new feature level cell with synapses to OCells.
 
         # FCell state variables.

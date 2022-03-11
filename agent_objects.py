@@ -64,6 +64,7 @@ class AgentOrange:
             wrapAround                 = False
         )
 
+        vpsVectorDim = spatialDimensions + otherDimensions
         self.vp = VectorMemory(
             columnDimensions          = 2048,
             cellsPerColumn            = 4,
@@ -71,31 +72,27 @@ class AgentOrange:
             FActivationThresholdMin   = 25,
             FActivationThresholdMax   = 30,
             initialPermanence         = 0.3,
-            lowerThreshold            = 0.1,
             permanenceIncrement       = 0.04,
             permanenceDecrement       = 0.005,
             permanenceDecay           = 0.001,
             segmentDecay              = 2000,
             WMEntryDecay              = 25,
-            initialPosVariance        = 10,
-            OActivationThreshold      = 13,
             objectRepActivation       = 25,
             maxSynapsesToAddPer       = 5,
-            maxSegmentsPerCell        = 32,
             maxSynapsesPerSegment     = 50,
             equalityThreshold         = 30,
-            pctAllowedOCellConns      = 0.8,
             WMStabilityThreshold      = 3,
-            vectorDimensions          = spatialDimensions,
+            vectorDimensions          = vpsVectorDim,
             numVectorSynapses         = 500,
+            initialPosVariance        = 10,
             vectorRange               = 800,
             vectorScaleFactor         = 0.8,
-            WMStabilityPct            = 1.0
+            WMStabilityPct            = 0.9
         )
 
         self.lastVector = []
         self.newVector  = []
-        for i in range( spatialDimensions ):
+        for i in range( vpsVectorDim ):
             self.lastVector.append( 0 )
             self.newVector.append( 0 )
         self.lastColour = 1
@@ -242,9 +239,9 @@ class AgentOrange:
             self.newVector[ 1 ] = chosePos[ 1 ] - sensePosY
 
             # Append on the colour portion of the vector.
-#            colourVector = objC - self.lastColour
-#            self.newVector[ 2 ] = colourVector * 100
-#            self.lastColour = objC
+            colourVector = objC - self.lastColour
+            self.newVector[ 2 ] = colourVector * 100
+            self.lastColour = objC
 
         elif len( vpDesiredNewVector ) != len( self.newVector ):
             print( "VP outputting vector of wrong dimensions." )

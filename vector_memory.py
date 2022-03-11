@@ -9,9 +9,9 @@ from useful_functions import NoRepeatInsort
 class VectorMemory:
 
     def __init__( self, columnDimensions, cellsPerColumn, numObjectCells, FActivationThresholdMin, FActivationThresholdMax,
-        initialPermanence, lowerThreshold, permanenceIncrement, permanenceDecrement, permanenceDecay, segmentDecay, WMEntryDecay,
-        initialPosVariance, objectRepActivation, OActivationThreshold, maxSynapsesToAddPer, maxSegmentsPerCell,
-        maxSynapsesPerSegment, equalityThreshold, pctAllowedOCellConns , WMStabilityThreshold, vectorDimensions,
+        initialPermanence, permanenceIncrement, permanenceDecrement, permanenceDecay, segmentDecay, WMEntryDecay,
+        initialPosVariance, objectRepActivation, maxSynapsesToAddPer,
+        maxSynapsesPerSegment, equalityThreshold, WMStabilityThreshold, vectorDimensions,
         numVectorSynapses, vectorRange, vectorScaleFactor, WMStabilityPct ):
 
         self.columnDimensions        = columnDimensions         # Dimensions of the column space.
@@ -21,7 +21,6 @@ class VectorMemory:
         self.FActivationThresholdMax = FActivationThresholdMax  # Max threshold of active connected incident synapses...
                                                                 # needed to activate segment.
         self.initialPermanence       = initialPermanence        # Initial permanence of a new synapse.
-        self.lowerThreshold          = lowerThreshold           # The lowest permanence for synapse to be active.
         self.permanenceIncrement     = permanenceIncrement      # Amount by which permanences of synapses are incremented during learning.
         self.permanenceDecrement     = permanenceDecrement      # Amount by which permanences of synapses are decremented during learning.
         self.permanenceDecay         = permanenceDecay          # Amount to decay permances each time step if < 1.0.
@@ -29,13 +28,9 @@ class VectorMemory:
         self.WMEntryDecay            = WMEntryDecay             # The time entries in working memory stay before being deleted if inactive.
         self.initialPosVariance      = initialPosVariance       # Amount of range vector positions are valid in.
         self.objectRepActivation     = objectRepActivation       # Number of active OCells in object layer at one time.
-        self.OActivationThreshold    = OActivationThreshold     # Threshold of active connected OToFSynapses...
-                                                                # needed to activate OCell.
         self.maxSynapsesToAddPer     = maxSynapsesToAddPer       # The maximum number of FToFSynapses added to a segment during creation.
-        self.maxSegmentsPerCell      = maxSegmentsPerCell       # The maximum number of segments per cell.
         self.maxSynapsesPerSegment   = maxSynapsesPerSegment     # Maximum number of active synapses allowed on a segment.
         self.equalityThreshold       = equalityThreshold        # The number of equal synapses for two segments to be considered identical.
-        self.pctAllowedOCellConns    = pctAllowedOCellConns     # Percent of OCells an FCell can build connections to.
         self.WMyStabilityThreshold   = WMStabilityThreshold     # The threshold of stable segments in working memory for it to be considered stable
         self.vectorDimensions        = vectorDimensions         # The number of dimensions of our vector space.
         self.numVectorSynapses       = numVectorSynapses        # The number of vector synapses in segments.
@@ -51,7 +46,7 @@ class VectorMemory:
         # Create cells in feature layer.
         self.FCells = []
         for i in range( columnDimensions * cellsPerColumn ):
-            self.FCells.append( FCell( initialPermanence, numObjectCells, pctAllowedOCellConns, segmentDecay ) )
+            self.FCells.append( FCell() )
         self.activeFCells     = []
         self.lastActiveFCells = []
         self.winnerFCells     = []
