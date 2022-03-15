@@ -2,6 +2,7 @@ import sys
 import numpy
 from random import randrange, sample
 from bisect import bisect_left
+from useful_functions import Within
 
 from htm.bindings.sdr import SDR, Metrics
 import htm.bindings.encoders
@@ -10,20 +11,6 @@ ScalarEncoderParameters = htm.bindings.encoders.ScalarEncoderParameters
 from htm.bindings.algorithms import SpatialPooler
 from htm.bindings.algorithms import Classifier
 from vector_memory import VectorMemory
-
-def Within ( value, minimum, maximum, equality ):
-# Checks if value is <= maximum and >= minimum.
-
-    if equality:
-        if value <= maximum and value >= minimum:
-            return True
-        else:
-            return False
-    else:
-        if value < maximum and value > minimum:
-            return True
-        else:
-            return False
 
 class AgentOrange:
 
@@ -84,7 +71,6 @@ class AgentOrange:
             WMStabilityThreshold      = 3,
             vectorDimensions          = vpsVectorDim,
             numVectorSynapses         = 500,
-            initialPosVariance        = 10,
             vectorRange               = 800,
             vectorScaleFactor         = 0.8,
             WMStabilityPct            = 0.9
@@ -120,10 +106,10 @@ class AgentOrange:
 
         return log_data
 
-    def SendStateData( self, stateNumber, stateColour ):
+    def SendStateData( self, stateNumber ):
     # Get the active cells from vp
 
-        return self.vp.SendData( stateNumber, stateColour )
+        return self.vp.SendData( stateNumber )
 
     def GetStateData( self ):
     # Get the state data from vp.
@@ -136,7 +122,7 @@ class AgentOrange:
         return self.vp.GetGraphData()
 
     def PrintBitRep( self, log_data ):
-    # Prints out the bit represention.
+    # Returns the bit represention as a string.
 
         log_data.append( "CenterX: " + str( self.centerX ) + ", CenterY: " + str( self.centerY ) )
 

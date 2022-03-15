@@ -1,80 +1,33 @@
 import numpy
-import random
+from useful_functions import Within, BinarySearch, NoRepeatInsort
+from random import randrange
 
 from htm.bindings.sdr import SDR, Metrics
-from htm.encoders.rdse import RDSE, RDSE_Parameters
 import htm.bindings.encoders
-ScalarEncoder = htm.bindings.encoders.ScalarEncoder
-ScalarEncoderParameters = htm.bindings.encoders.ScalarEncoderParameters
-RDSE = htm.bindings.encoders.RDSE
-RDSE_Parameters = htm.bindings.encoders.RDSE_Parameters
 from htm.bindings.algorithms import SpatialPooler
 from htm.bindings.algorithms import TemporalMemory
-from htm.bindings.algorithms import Classifier
+from vector_memory import VectorMemory
 
 class Agent:
 
-    testThreshold   = 30
-    burstThreshold  = 5
-    goalThreshold   = 1.0
-    motorDimensions = 3
-    synapseInc      = 0.05
-    synapseDec      = 0.01
+    def __init__( self, name, senseDimX, senseDimY, screenHeight, screenWidth, ballWidth, ballHeight, paddleWidth, paddleHeight ):
 
-    def __init__( self, name, screenHeight, screenWidth ):
         self.ID = name
+        self.senseResX = 20
+        self.senseResY = 20
+        self.scaleX = senseDimX / self.senseResX
+        self.scaleY = senseDimY / self.senseResY
+        if self.scaleX < 1 or self.scaleY < 1:
+            sys.exit( "Resolution (X and Y) must be less than local dimensions (X and Y)." )
 
-        self.senseBuffer = []       # Memory of all [ senseSDR, winningMotor ] experienced this sequence.
+        self.screenHeight = screenHeight
+        self.screenWidth  = screenWidth
+        self.ballHeight   = ballHeight
+        self.ballWidth    = ballWidth
+        self.paddleHeight = paddleHeight
+        self.paddleWidth  = paddleWidth
 
-        # Set up encoder parameters
-        paddleEncodeParams    = ScalarEncoderParameters()
-        ballXEncodeParams     = ScalarEncoderParameters()
-        ballYEncodeParams     = ScalarEncoderParameters()
-        ballVelEncodeParams   = RDSE_Parameters()
-        manInEncodeParams     = ScalarEncoderParameters()
-
-        paddleEncodeParams.activeBits = 99
-        paddleEncodeParams.radius     = 200
-        paddleEncodeParams.clipInput  = False
-        paddleEncodeParams.minimum    = -screenHeight / 2
-        paddleEncodeParams.maximum    = screenHeight / 2
-        paddleEncodeParams.periodic   = False
-
-        ballXEncodeParams.activeBits = 21
-        ballXEncodeParams.radius     = 40
-        ballXEncodeParams.clipInput  = False
-        ballXEncodeParams.minimum    = -screenWidth / 2
-        ballXEncodeParams.maximum    = screenWidth / 2
-        ballXEncodeParams.periodic   = False
-
-        ballYEncodeParams.activeBits = 21
-        ballYEncodeParams.radius     = 40
-        ballYEncodeParams.clipInput  = False
-        ballYEncodeParams.minimum    = -screenHeight
-        ballYEncodeParams.maximum    = screenHeight
-        ballYEncodeParams.periodic   = False
-
-        ballVelEncodeParams.size       = 400
-        ballVelEncodeParams.activeBits = 25
-        ballVelEncodeParams.resolution = 0.1
-
-        manInEncodeParams.activeBits = 10
-        manInEncodeParams.radius     = 1
-        manInEncodeParams.clipInput  = False
-        manInEncodeParams.minimum    = -1
-        manInEncodeParams.maximum    = 2
-        manInEncodeParams.periodic   = False
-
-        # Set up encoders
-        self.paddleEncoder   = ScalarEncoder( paddleEncodeParams )
-        self.ballEncoderX    = ScalarEncoder( ballXEncodeParams )
-        self.ballEncoderY    = ScalarEncoder( ballYEncodeParams )
-        self.ballEncoderVelX = RDSE( ballVelEncodeParams )
-        self.ballEncoderVelY = RDSE( ballVelEncodeParams )
-        self.manInEncoder    = ScalarEncoder( manInEncodeParams )
-
-        self.encodingWidth = ( self.paddleEncoder.size + self.ballEncoderX.size + self.ballEncoderY.size +
-            self.ballEncoderVelX.size + self.ballEncoderVelY.size + self.manInEncoder.size )
+        self.encodingWidth = self.senseResX * self.senseResY
 
         self.sp = SpatialPooler(
             inputDimensions            = ( self.encodingWidth, ),
@@ -92,185 +45,179 @@ class Agent:
             wrapAround                 = False
         )
 
-        self.tp = TemporalMemory(
-            columnDimensions          = ( 2048, ),
-            cellsPerColumn            = 32,
-            activationThreshold       = 16,
-            initialPermanence         = 0.21,
-            connectedPermanence       = 0.1,
-            minThreshold              = 12,
-            maxNewSynapseCount        = 20,
-            permanenceIncrement       = 0.1,
-            permanenceDecrement       = 0.1,
-            predictedSegmentDecrement = 0.0,
-            maxSegmentsPerCell        = 128,
-            maxSynapsesPerSegment     = 32,
-            seed                      = 42
+#        self.tp = TemporalMemory(
+#            columnDimensions          = ( 2048, ),
+#            cellsPerColumn            = 32,
+#            activationThreshold       = 16,
+#            initialPermanence         = 0.21,
+#            connectedPermanence       = 0.1,
+#            minThreshold              = 12,
+#            maxNewSynapseCount        = 20,
+#            permanenceIncrement       = 0.1,
+#            permanenceDecrement       = 0.1,
+#            predictedSegmentDecrement = 0.0,
+#            maxSegmentsPerCell        = 128,
+#            maxSynapsesPerSegment     = 32,
+#            seed                      = 42
+#        )
+
+        vpsVectorDim = 2
+        self.vp = VectorMemory(
+            columnDimensions          = 2048,
+            cellsPerColumn            = 4,
+            numObjectCells            = 1000,
+            FActivationThresholdMin   = 25,
+            FActivationThresholdMax   = 30,
+            initialPermanence         = 0.3,
+            permanenceIncrement       = 0.04,
+            permanenceDecrement       = 0.005,
+            permanenceDecay           = 0.001,
+            segmentDecay              = 2000,
+            WMEntryDecay              = 25,
+            objectRepActivation       = 25,
+            maxSynapsesToAddPer       = 5,
+            maxSynapsesPerSegment     = 50,
+            equalityThreshold         = 30,
+            vectorDimensions          = vpsVectorDim,
+            numVectorSynapses         = 500,
+            vectorRange               = 1600,
+            vectorScaleFactor         = 0.9,
+            WMStabilityThreshold      = 25,
+            WMvectorScaleFactor       = 0.8
         )
 
-        self.motorSynapse = numpy.random.uniform(
-            low = 0.0, high = 1.0,
-            size = ( self.tp.getColumnDimensions()[ 0 ] * self.tp.getCellsPerColumn() * self.motorDimensions, )
-        )
+        self.lastVector = []
+        self.newVector  = []
+        for i in range( vpsVectorDim ):
+            self.lastVector.append( 0 )
+            self.newVector.append( 0 )
 
-        self.manualInput = -1
+        self.senseX = 0
+        self.senseY = 0
 
-        self.numEvents = 0
-        self.percentSuccess = 0
+        self.localBitRep = []
 
-    def Clear ( self ):
-    # Clear sense buffer.
-        self.senseBuffer.clear()
-        self.tp.reset()
+    def ReturnSenseOrganLocation( self ):
+    # Return the senseX and senseY.
 
+        return self.senseX, self.senseY
 
-    def SendSuggest ( self, input ):
-    # Sets the movement suggestion from user. manualInput = -1 means no suggestion.
-        self.manualInput = input
-        self.tp.reset()
+    def GetLogData( self ):
+    # Get the local log data and return it.
 
-    def EncodeSenseData ( self, yPos, ballX, ballY, ballXSpeed, ballYSpeed ):
+        log_data = []
+
+        log_data.append( self.PrintBitRep( self.localBitRep, self.senseResX, self.senseResY, self.senseX, self.senseY ) )
+
+        log_data.append( "Last Vector: " + str( self.lastVector ) + ", New Vector: " + str( self.newVector ) )
+
+        self.vp.BuildLogData( log_data )
+
+        return log_data
+
+    def SendStateData( self, stateNumber ):
+    # Get the active cells from vp
+
+        return self.vp.SendData( stateNumber )
+
+    def GetStateData( self ):
+    # Get the state data from vp.
+
+        return self.vp.GetStateInformation()
+
+    def GetGraphData( self ):
+    # Return the number of active cells in vp in this time step.
+
+        return self.vp.GetGraphData()
+
+    def PrintBitRep( self, whatPrintRep, whatPrintX, whatPrintY, centerX, centerY ):
+    # Returns the bit represention as a string.
+
+        bitRepString = ""
+
+        bitRepString += str( self.ID ) + ", CenterX: " + str( centerX ) + ", CenterY: " + str( centerY ) + "\n"
+        bitRepString += "ResolutionX: " + str( whatPrintX ) + ", ResolutionY: " + str( whatPrintY ) + "\n"
+
+        for y in range( whatPrintY ):
+            for x in range( whatPrintX ):
+                if x == whatPrintX - 1:
+                    bitRepString += "\n"
+                else:
+                    if BinarySearch( whatPrintRep, x + ( y * whatPrintX ) ):
+                        bitRepString += "1"
+                    else:
+                        bitRepString += "0"
+
+        bitRepString += "\n"
+
+        return bitRepString
+
+    def BuildLocalBitRep( self, paddleAY, paddleAX, paddleBY, paddleBX, ballX, ballY ):
+    # Builds a bit-rep SDR of localDim dimensions centered around point with resolution.
+
+        maxArraySize = self.senseResX * self.senseResY
+
+        self.localBitRep = []
+
+        for x in range( self.senseResX ):
+            for y in range( self.senseResY ):
+                posX = int( ( ( x - ( self.senseResX / 2 ) ) * self.scaleX ) + ( self.scaleX / 2 ) + self.senseX )
+                posY = int( ( ( y - ( self.senseResY / 2 ) ) * self.scaleY ) + ( self.scaleY / 2 ) + self.senseY )
+
+                # Ball bits.
+                if Within( posX, ballX - self.ballWidth, ballX + self.ballWidth, True ) and Within( posY, ballY - self.ballHeight, ballY + self.ballHeight, True ):
+                    NoRepeatInsort( self.localBitRep, x + ( y * self.senseResX ) )
+
+                # Wall bits.
+                elif not Within( posX, -self.screenWidth / 2, self.screenWidth / 2, True ) or not Within( posY, -self.screenHeight / 2, self.screenHeight / 2, True ):
+                    NoRepeatInsort( self.localBitRep, x + ( y * self.senseResX ) )
+
+                # Paddle A bits.
+                elif Within( posX, paddleAX - self.paddleWidth, paddleAX + self.paddleWidth, True ) and Within( posY, paddleAY - self.paddleHeight, paddleAY + self.paddleHeight, True ):
+                    NoRepeatInsort( self.localBitRep, x + ( y * self.senseResX ) )
+
+                # Paddle A bits.
+                elif Within( posX, paddleBX - self.paddleWidth, paddleBX + self.paddleWidth, True ) and Within( posY, paddleBY - self.paddleHeight, paddleBY + self.paddleHeight, True ):
+                    NoRepeatInsort( self.localBitRep, x + ( y * self.senseResX ) )
+
+#        print( self.PrintBitRep( self.localBitRep, self.senseResX, self.senseResY, self.senseX, self.senseY ) )
+
+        bitRepSDR = SDR( maxArraySize )
+        bitRepSDR.sparse = numpy.unique( self.localBitRep )
+        return bitRepSDR
+
+    def EncodeSenseData ( self, paddleAY, paddleAX, paddleBY, paddleBX, ballX, ballY ):
     # Encodes sense data as an SDR and returns it.
 
-        # Now we call the encoders to create bit representations for each value, and encode them.
-        paddleBits   = self.paddleEncoder.encode( yPos )
-        ballBitsX    = self.ballEncoderX.encode( ballX )
-        ballBitsY    = self.ballEncoderY.encode( ballY )
-        ballBitsVelX = self.ballEncoderVelX.encode( ballXSpeed )
-        ballBitsVelY = self.ballEncoderVelY.encode( ballYSpeed )
-        manInBits    = self.manInEncoder.encode( self.manualInput )
+        encoding = self.BuildLocalBitRep( paddleAY, paddleAX, paddleBY, paddleBX, ballX, ballY )
 
-        # Concatenate all these encodings into one large encoding for Spatial Pooling.
-        encoding = SDR( self.encodingWidth ).concatenate( [ paddleBits, ballBitsX, ballBitsY, ballBitsVelX, ballBitsVelY, manInBits ] )
         senseSDR = SDR( self.sp.getColumnDimensions() )
         self.sp.compute( encoding, True, senseSDR )
 
         return senseSDR
 
-    # NOT USED CURRENTLY
-    def Overlap ( self, SDR1, SDR2 ):
-    # Computes overlap score between two passed SDRs.
-
-        overlap = 0
-
-        for cell1 in SDR1.sparse:
-            if cell1 in SDR2.sparse:
-                overlap += 1
-
-        return overlap
-
-    # NOT USED CURRENTLY
-    def GreatestOverlap ( self, testSDR, listSDR, threshold ):
-    # Finds SDR in listSDR with greatest overlap with testSDR and returns it, and its index in the list.
-    # If none are found above threshold or if list is empty it returns an empty SDR of length testSDR, with index -1.
-
-        greatest = [ SDR( testSDR.size ), -1 ]
-
-        if len(listSDR) > 0:
-            # The first element of listSDR should always be a union of all the other SDRs in list,
-            # so a check can be performed first.
-            if self.Overlap( testSDR, listSDR[0] ) >= threshold:
-                aboveThreshold = []
-                for idx, checkSDR in enumerate( listSDR ):
-                    if idx != 0:
-                        thisOverlap = self.Overlap( testSDR, checkSDR )
-                        if thisOverlap >= threshold:
-                            aboveThreshold.append( [ thisOverlap, [checkSDR, idx] ] )
-                if len( aboveThreshold ) > 0:
-                    greatest = sorted( aboveThreshold, key = lambda tup: tup[0], reverse = True )[ 0 ][ 1 ]
-
-        return greatest
-
-    def UpdateScore ( self, successEvent ):
-    # Updates agents event and success percentage.
-
-        numSuccess = self.numEvents * self.percentSuccess / 100
-        self.numEvents += 1
-        if successEvent:
-            numSuccess += 1
-        self.percentSuccess = 100 * numSuccess / self.numEvents
-
-    def DetermineBurstPercent ( self ):
-    # Calculates percentage of active cells that are currently bursting.
-
-        activeCellsTP = self.tp.getActiveCells()
-
-        # Get columns of all active cells.
-        activeColumnsTP = []
-        for cCell in activeCellsTP.sparse:
-            activeColumnsTP.append( self.tp.columnForCell( cCell ) )
-
-        # Get count of active cells in each active column.
-        colUnique, colCount = numpy.unique( activeColumnsTP, return_counts = True )
-
-        # Compute percentage of columns that are bursting.
-        bursting = 0
-        for c in colCount:
-            if c > 1:
-                bursting += 1
-        burstPercent = int( 100 * bursting / len( colCount ) )
-
-        return burstPercent
-
-    def Hippocampus ( self, feeling ):
-    # Learns sequence back sequenceLength-time steps in memory, then stores sequence along with feeling.
-
-        if feeling > 1.0 or feeling < -1.0:
-            sys.exit( "Feeling states should be in the range [-1.0, 1.0]" )
-
-        for buffEntry in self.senseBuffer:
-            if buffEntry[ 2 ]:
-                for cell in buffEntry[ 1 ].sparse:
-                    for i in range( self.motorDimensions ):
-                        if i == buffEntry[ 0 ]:
-                            self.motorSynapse[ ( cell * self.motorDimensions ) + i ] += self.synapseInc * feeling
-                            if self.motorSynapse[ ( cell * self.motorDimensions ) + i ] > 1.0:
-                                self.motorSynapse[ ( cell * self.motorDimensions ) + i ] = 1.0
-                        else:
-                            self.motorSynapse[ ( cell * self.motorDimensions ) + i ] -= self.synapseDec * feeling
-                            if self.motorSynapse[ ( cell * self.motorDimensions ) + i ] < 0.0:
-                                self.motorSynapse[ ( cell * self.motorDimensions ) + i ] = 0.0
-
-    def Brain ( self, yPos, ballX, ballY, ballXSpeed, ballYSpeed ):
+    def Brain ( self, paddleAX, paddleAY, paddleBX, paddleBY, ballX, ballY, ballVelX, ballVelY ):
     # Agents brain center.
 
-        # Generate SDR for sense data by feeding sense data into SP with learning.
-        senseSDR = self.EncodeSenseData( yPos, ballX, ballY, ballXSpeed, ballYSpeed )
+        senseSDR = self.EncodeSenseData( paddleAY, paddleAX, paddleBY, paddleBX, ballX, ballY )
 
-        # Feed present senseSDR into tp and generate active cells.
-        self.tp.compute( senseSDR, learn = True )
-        self.tp.activateDendrites( learn = True )
-        winnerCellsTP = self.tp.getWinnerCells()
+        self.lastVector = self.newVector.copy()
 
-        motorScore = [ 0.0, 0.0, 0.0 ]         # Keeps track of each motor output weighted score [ UP, STILL, DOWN ]
-        # Use active cells to determine motor action by feeding through motorSynapse.
-        for cell in winnerCellsTP.sparse:
-            for i in range( self.motorDimensions ):
-                motorScore[i] += self.motorSynapse[ ( cell * self.motorDimensions ) + i ]
+        # Feed in input and lastVector into vector memory network.
+        self.vp.Compute( senseSDR, self.lastVector )
 
-        # Use largest motorScore to choose winningMotor action.
-        largest = []
-        for i, v in enumerate( motorScore ):
-            if sorted( motorScore, reverse=True )[ 0 ] == v:
-                largest.append( i )                                         # 0 = UP, 1 = STILL, 2 = DOWN
-        winningMotor = random.choice( largest )
+        # Generate random motion vector for next time step.
+        senseLocationBefore = ( self.senseX, self.senseY )
+        senseOrganLocation = randrange( 3 )
+        if senseOrganLocation == 0:
+            self.senseX = paddleAX
+            self.senseY = paddleAY
+        elif senseOrganLocation == 1:
+            self.senseX = paddleBX
+            self.senseY = paddleBY
+        elif senseOrganLocation == 2:
+            self.senseX = ballX
+            self.senseY = ballY
+        self.newVector = [ self.senseX - senseLocationBefore[ 0 ], self.senseY - senseLocationBefore[ 1 ] ]
 
-        # Determine if cells are bursting above some percent threshold or not.
-        if self.DetermineBurstPercent() <= self.burstThreshold:
-            isPredicted = True
-        else:
-            isPredicted = False
-
-        # Add senseSDR and winningMotor to buffer.
-        self.senseBuffer.insert( 0, [ winningMotor, winnerCellsTP, isPredicted ] )
-
-#        if self.manualInput != -1:
-#            # If motor suggestion, manualInput, equals winningMotor then send a small reward.
-#            if winningMotor == self.manualInput:
-#                self.Hippocampus( 0.1 )
-#            # If not send a small punishment.
-#            else:
-#                self.Hippocampus( -0.1 )
-
-        # Return winning motor function.
-        return winningMotor
+        self.vp.PredictFCells( self.newVector )

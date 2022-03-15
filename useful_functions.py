@@ -1,6 +1,20 @@
 from bisect import bisect_left
 from random import randrange
 
+def Within ( value, minimum, maximum, equality ):
+# Checks if value is <= maximum and >= minimum.
+
+    if equality:
+        if value <= maximum and value >= minimum:
+            return True
+        else:
+            return False
+    else:
+        if value < maximum and value > minimum:
+            return True
+        else:
+            return False
+
 def BinarySearch( list, val ):
 # Search a sorted list: return False if val not in list, and True if it is.
 

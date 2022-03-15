@@ -4,8 +4,9 @@ from useful_functions import BinarySearch, NoRepeatInsort, ModThisSynapse, Index
 
 class Segment:
 
-    def __init__( self, dimensions, incidentCellsList, terminalCell, vector, vectorCells, initialActivationThreshold,
-        initialPermanence, permanenceIncrement, permanenceDecay, numVectorSynapses, vectorRange, vectorSynapseScaleFactor ):
+    def __init__( self, dimensions, incidentCellsList, incidentColumns, terminalCell, vector, vectorCells,
+        initialActivationThreshold, initialPermanence, permanenceIncrement, permanenceDecay, numVectorSynapses,
+        vectorRange, vectorSynapseScaleFactor ):
     # Initialize the inidividual segment structure class.
 
         self.active              = True                         # True means it's predictive, and above threshold terminal cells fired.
@@ -15,19 +16,20 @@ class Segment:
 
         # Synapse portion.
         self.incidentSynapses    = incidentCellsList.copy()
+        self.incidentColumns     = incidentColumns.copy()
         self.terminalSynapse     = terminalCell
 
         self.incidentActivation  = []           # A list of all cells that last overlapped with incidentSynapses.
 
         # Vector portion.
-        self.dimensions = dimensions         # Number of dimensions vector positions will be in.
-        self.numVectorSynapses = numVectorSynapses
+        self.dimensions               = dimensions         # Number of dimensions vector positions will be in.
+        self.numVectorSynapses        = numVectorSynapses
         self.vectorSynapseScaleFactor = vectorSynapseScaleFactor
-        self.vectorRange       = []
+        self.vectorRange              = []
         for d in range( self.dimensions ):
             self.vectorRange.append( [ -vectorRange, vectorRange ] )
-        self.permanenceIncrement = permanenceIncrement
-        self.permanenceDecay     = permanenceDecay
+        self.permanenceIncrement      = permanenceIncrement
+        self.permanenceDecay          = permanenceDecay
 
         if vector != None:
             if len( vector ) != dimensions:
@@ -107,6 +109,23 @@ class Segment:
 
         NoRepeatInsort( self.incidentActivation, incidentCell )
 
+    def CheckColumnOverlapAndVector( self, columnSDR, vector ):
+    # Checks the overlap of columnSDR if above threshold, and vector is inside.
+    # If so make myself active. Return my overlap.
+
+        overlap = len( FastIntersect( self.incidentColumns, columnSDR ) )
+
+        if overlap >= self.activationThreshold:
+            self.activeAboveThresh = True
+
+            if self.Inside( vector ):
+                self.active          = True
+                self.timeSinceActive = 0
+                return overlap
+
+        self.active = False
+        return None
+
     def CheckActivation( self, vector ):
     # Checks the incidentActivation against activationThreshold to see if segment becomes active.
 
@@ -114,7 +133,7 @@ class Segment:
             self.activeAboveThresh = True
 
             if self.Inside( vector ):
-                self.active = True
+                self.active          = True
                 self.timeSinceActive = 0
                 return self.terminalSynapse
 
@@ -129,7 +148,7 @@ class Segment:
         self.timeSinceActive   += 1
         self.activeAboveThresh  = False
 
-    def RemoveIncidentSynapse( self, synapseToDelete ):
+    def RemoveIncidentSynapse( self, synapseToDelete, columnToDelete ):
     # Delete the incident synapse sent.
 
         index = IndexIfItsIn( self.incidentSynapses, synapseToDelete )
@@ -139,15 +158,23 @@ class Segment:
             print( "Attempt to remove synapse from segment, but synapse doesn't exist." )
             exit()
 
-    def NewIncidentSynapse( self, synapseToCreate ):
+        if self.incidentColumns[ index ] == columnToDelete:
+            del self.incidentColumns[ index ]
+        else:
+            print( "Column doesn't match cell." )
+            exit()
+
+    def NewIncidentSynapse( self, synapseToCreate, columnToCreate ):
     # Create a new incident synapse.
 
         index = bisect_left( self.incidentSynapses, synapseToCreate )
 
         if index == len( self.incidentSynapses ):
             self.incidentSynapses.append( synapseToCreate )
+            self.incidentColumns.append( columnToCreate )
         elif self.incidentSynapses[ index ] != synapseToCreate:
             self.incidentSynapses.insert( index, synapseToCreate )
+            self.incidentColumns.insert( index, columnToCreate )
         else:
             print( "Attempt to add synapse to segment, but synapse already exists." )
             exit()
@@ -155,11 +182,12 @@ class Segment:
     def AlreadySynapseToColumn( self, checkSynapse, cellsPerColumn ):
     # Checks if this segment has a synapse to the same column as checkSynapse.
 
-        for synapse in self.incidentSynapses:
-            if int( synapse / cellsPerColumn ) == int( checkSynapse / cellsPerColumn ):
-                return True
+        checkColumn = int( checkSynapse / cellsPerColumn )
 
-        return False
+        if BinarySearch( self.incidentColumns, checkColumn ):
+            return True
+        else:
+            return False
 
     def Equality( self, other, equalityThreshold ):
     # Runs the following comparison of equality: segment1 == segment2, comparing their activation intersection, but not vector.
@@ -185,6 +213,15 @@ class Segment:
 
         return self.vectorSynapses.copy()
 
+    def CellForColumn( self, column ):
+    # Return the cell for the column.
+
+        index = IndexIfItsIn( self.incidentColumns, column )
+        if index != None:
+            return self.incidentSynapses[ index ]
+        else:
+            return None
+
 #-------------------------------------------------------------------------------
 
 class SegmentStructure:
@@ -201,7 +238,7 @@ class SegmentStructure:
         self.permanenceDecay       = permanenceDecay
         self.activeThresholdMin    = activeThresholdMin
         self.activeThresholdMax    = activeThresholdMax
-        self.incCellsPerColumn     = incidentCellsPerColumn
+        self.cellsPerColumn        = incidentCellsPerColumn
         self.maxSynapsesToAddPer   = maxSynapsesToAddPer
         self.maxSynapsesPerSegment = maxSynapsesPerSegment
         self.maxTimeSinceActive    = maxTimeSinceActive
@@ -236,7 +273,7 @@ class SegmentStructure:
 
         self.incidentSegments[ incCell ].insert( insertIndex, segIndex )
         self.incidentPermanences[ incCell ].insert( insertIndex, self.initialPermanence )
-        self.segments[ segIndex ].NewIncidentSynapse( incCell )
+        self.segments[ segIndex ].NewIncidentSynapse( incCell, int( incCell / self.cellsPerColumn ) )
 
     def DeleteSynapse( self, incCell, segIndex ):
     # Remove a synapse to specified segment.
@@ -246,7 +283,7 @@ class SegmentStructure:
         if delIndex != len( self.incidentSegments[ incCell ] ) and self.incidentSegments[ incCell ][ delIndex ] == segIndex:
             del self.incidentSegments[ incCell ][ delIndex ]
             del self.incidentPermanences[ incCell ][ delIndex ]
-            self.segments[ segIndex ].RemoveIncidentSynapse( incCell )
+            self.segments[ segIndex ].RemoveIncidentSynapse( incCell, int( incCell / self.cellsPerColumn ) )
 
         return delIndex
 
@@ -268,7 +305,8 @@ class SegmentStructure:
                         indexAt += 1
 
                 # Decrease terminal reference.
-                Cells[ self.segments[ segIndex ].terminalSynapse ].isTerminalCell -= 1
+                if self.segments[ segIndex ].terminalSynapse != None:
+                    Cells[ self.segments[ segIndex ].terminalSynapse ].isTerminalCell -= 1
 
                 # Delete the segment.
                 del self.segments[ segIndex ]
@@ -276,7 +314,7 @@ class SegmentStructure:
     def CreateSegment( self, Cells, incidentCellsList, terminalCell, vector, vectorCells ):
     # Creates a new segment.
 
-        newSegment = Segment( self.dimensions, [], terminalCell, vector, vectorCells, self.activeThresholdMin,
+        newSegment = Segment( self.dimensions, [], [], terminalCell, vector, vectorCells, self.activeThresholdMin,
             self.initialPermanence, self.permanenceIncrement, self.permanenceDecay, self.numVectorSynapses,
             self.vectorRange, self.vectorScaleFactor )
         self.segments.append( newSegment )
@@ -287,7 +325,8 @@ class SegmentStructure:
         for incCell in incidentCellsList:
             self.AddSynapse( incCell, indexOfNew )
 
-        Cells[ terminalCell ].isTerminalCell += 1
+        if terminalCell != None:
+            Cells[ terminalCell ].isTerminalCell += 1
 
     def UnifyVectors( self, vectorCellsList ):
     # Use the list of vector cells contained in vectorCellsList and unify them into one by taking the max for each cell.
@@ -345,7 +384,7 @@ class SegmentStructure:
 
         self.DeleteSegments( Cells, segsToDelete )
 
-    def GetStimulatedCells( self, activeCells, vector ):
+    def GetStimulatedSegments( self, activeCells, vector ):
     # Using the activeCells and vector find all segments that activate, and therefore all terminal cells that become
     # stimulated by these segments. Return these stimulated cells as a list.
 
@@ -365,6 +404,27 @@ class SegmentStructure:
                     NoRepeatInsort( stimulatedCells, cellIfActive )
 
         return stimulatedCells
+
+    def CheckSegmentColumnOverlap( self, columnSDR, vector ):
+    # Checks all segments if their columns overlap with columnSDR above threshold.
+    # Also check if their vector activates. Those that do make them active.
+
+        mostSegment = None
+        mostOverlap = 0
+
+        for segIndex, segment in enumerate( self.segments ):
+            overlap = segment.CheckColumnOverlapAndVector( columnSDR, vector )
+            if overlap != None and overlap > mostOverlap:
+                mostSegment = segIndex
+
+        if mostSegment != None:
+            NoRepeatInsort( self.activeSegments, mostSegment )
+        return mostSegment
+
+    def CellForColumn( self, segIndex, column ):
+    # Return cell for column for indexed segment.
+
+        return self.segments[ segIndex ].CellForColumn( column )
 
     def ChangePermanence( self, incCell, segIndex, permanenceChange ):
     # Change the permanence of synapse incident on incCell, part of segIndex, by permanenceChange.
@@ -387,7 +447,7 @@ class SegmentStructure:
         for activeSeg in self.activeSegments:
 
             # 1.)...
-            if not Cells[ self.segments[ activeSeg ].terminalSynapse ].winner:
+            if self.segments[ activeSeg ].terminalSynapse != None and not Cells[ self.segments[ activeSeg ].terminalSynapse ].winner:
                 for incCell in self.segments[ activeSeg ].incidentSynapses:
                     self.ChangePermanence( incCell, activeSeg, -self.permanenceDecrement )
 
@@ -395,7 +455,7 @@ class SegmentStructure:
                 synapseToAdd = lastWinnerCells.copy()
                 for incCell in self.segments[ activeSeg ].incidentSynapses:
                     # 2.)...
-                    if Cells[ incCell ].lastActive:
+                    if ( self.segments[ activeSeg ].terminalSynapse != None and Cells[ incCell ].lastActive ) or BinarySearch( lastWinnerCells, incCell ):
                         self.ChangePermanence( incCell, activeSeg, self.permanenceIncrement )
                     # 3.)...
                     else:
@@ -410,7 +470,7 @@ class SegmentStructure:
                     # Check to make sure this segment doesn't already have a synapse to this column.
                     realSynapsesToAdd = []
                     for synAdd in synapseToAdd:
-                        if not self.segments[ activeSeg ].AlreadySynapseToColumn( synAdd, self.incCellsPerColumn ):
+                        if not self.segments[ activeSeg ].AlreadySynapseToColumn( synAdd, self.cellsPerColumn ):
                             realSynapsesToAdd.append( synAdd )
 
                     reallyRealSynapsesToAdd = sample( realSynapsesToAdd, min( len( realSynapsesToAdd ), self.maxSynapsesToAddPer ) )
@@ -481,7 +541,7 @@ class SegmentStructure:
         for group in segmentGroupings:
             if len( group ) > 1:
                 SDRList     = [ self.segments[ group[ i ] ].incidentSynapses for i in range( len( group) ) ]
-                unitySDR    = GenerateUnitySDR( SDRList, len( SDRList[ 0 ] ), self.incCellsPerColumn )
+                unitySDR    = GenerateUnitySDR( SDRList, len( SDRList[ 0 ] ), self.cellsPerColumn )
                 unityVector = self.UnifyVectors( [ self.segments[ group[ k ] ].ReturnVectorCells() for k in range( len( group ) ) ] )
 
                 self.CreateSegment( Cells, unitySDR, self.segments[ group[ 0 ] ].terminalSynapse, None, unityVector )

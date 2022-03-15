@@ -9,10 +9,9 @@ from useful_functions import NoRepeatInsort
 class VectorMemory:
 
     def __init__( self, columnDimensions, cellsPerColumn, numObjectCells, FActivationThresholdMin, FActivationThresholdMax,
-        initialPermanence, permanenceIncrement, permanenceDecrement, permanenceDecay, segmentDecay, WMEntryDecay,
-        initialPosVariance, objectRepActivation, maxSynapsesToAddPer,
-        maxSynapsesPerSegment, equalityThreshold, WMStabilityThreshold, vectorDimensions,
-        numVectorSynapses, vectorRange, vectorScaleFactor, WMStabilityPct ):
+        initialPermanence, permanenceIncrement, permanenceDecrement, permanenceDecay, segmentDecay, WMEntryDecay, objectRepActivation,
+        maxSynapsesToAddPer, maxSynapsesPerSegment, equalityThreshold, vectorDimensions, numVectorSynapses, vectorRange, vectorScaleFactor,
+        WMStabilityThreshold, WMvectorScaleFactor ):
 
         self.columnDimensions        = columnDimensions         # Dimensions of the column space.
         self.FCellsPerColumn         = cellsPerColumn           # Number of cells per column.
@@ -26,17 +25,16 @@ class VectorMemory:
         self.permanenceDecay         = permanenceDecay          # Amount to decay permances each time step if < 1.0.
         self.segmentDecay            = segmentDecay             # If a segment hasn't been active in this many time steps then delete it.
         self.WMEntryDecay            = WMEntryDecay             # The time entries in working memory stay before being deleted if inactive.
-        self.initialPosVariance      = initialPosVariance       # Amount of range vector positions are valid in.
-        self.objectRepActivation     = objectRepActivation       # Number of active OCells in object layer at one time.
-        self.maxSynapsesToAddPer     = maxSynapsesToAddPer       # The maximum number of FToFSynapses added to a segment during creation.
-        self.maxSynapsesPerSegment   = maxSynapsesPerSegment     # Maximum number of active synapses allowed on a segment.
+        self.objectRepActivation     = objectRepActivation      # Number of active OCells in object layer at one time.
+        self.maxSynapsesToAddPer     = maxSynapsesToAddPer      # The maximum number of FToFSynapses added to a segment during creation.
+        self.maxSynapsesPerSegment   = maxSynapsesPerSegment    # Maximum number of active synapses allowed on a segment.
         self.equalityThreshold       = equalityThreshold        # The number of equal synapses for two segments to be considered identical.
-        self.WMyStabilityThreshold   = WMStabilityThreshold     # The threshold of stable segments in working memory for it to be considered stable
         self.vectorDimensions        = vectorDimensions         # The number of dimensions of our vector space.
         self.numVectorSynapses       = numVectorSynapses        # The number of vector synapses in segments.
         self.vectorRange             = vectorRange              # The initial total range of vector views in segments.
         self.vectorScaleFactor       = vectorScaleFactor        # The adjustment of vector permanences in segments off-center.
-        self.WMStabilityPct          = WMStabilityPct           # The percent of stable entries for working memory to be stable.
+        self.WMStabilityThreshold    = WMStabilityThreshold     # The percent of stable entries for working memory to be stable.
+        self.WMvectorScaleFactor     = WMvectorScaleFactor      # The adjustment of vector permanences in segments off-center for working memory.
 
         # Create column SDR storage.
         self.columnSDR       = []
@@ -67,24 +65,26 @@ class VectorMemory:
         self.stateOCellData = []            # Stores the data for the active O-Cells Report.
 
         # Stores and deals with all the OCell to FCell (Working Memory) segments.
-        self.OToFSegmentStruct = SegmentStructure( 0, initialPermanence, permanenceIncrement, permanenceDecrement,
-            permanenceDecay, FActivationThresholdMin, FActivationThresholdMax, columnDimensions, cellsPerColumn,
-            maxSynapsesToAddPer, maxSynapsesPerSegment, segmentDecay, equalityThreshold, numVectorSynapses, vectorRange, vectorScaleFactor )
-        self.OToOSegmentStruct = SegmentStructure( 0, initialPermanence, permanenceIncrement, permanenceDecrement,
-            permanenceDecay, FActivationThresholdMin, FActivationThresholdMax, numObjectCells, 1,
-            maxSynapsesToAddPer, maxSynapsesPerSegment, segmentDecay, equalityThreshold, numVectorSynapses, vectorRange, vectorScaleFactor )
+#        self.OToFSegmentStruct = SegmentStructure( 0, initialPermanence, permanenceIncrement, permanenceDecrement,
+#            permanenceDecay, FActivationThresholdMin, FActivationThresholdMax, columnDimensions, cellsPerColumn,
+#            maxSynapsesToAddPer, maxSynapsesPerSegment, segmentDecay, equalityThreshold, numVectorSynapses, vectorRange, vectorScaleFactor )
+#        self.OToOSegmentStruct = SegmentStructure( 0, initialPermanence, permanenceIncrement, permanenceDecrement,
+#            permanenceDecay, FActivationThresholdMin, FActivationThresholdMax, numObjectCells, 1,
+#            maxSynapsesToAddPer, maxSynapsesPerSegment, segmentDecay, equalityThreshold, numVectorSynapses, vectorRange, vectorScaleFactor )
 
+        self.workingMemory = WorkingMemory( vectorRange, WMEntryDecay, WMStabilityThreshold,
+            vectorDimensions, initialPermanence, permanenceIncrement, permanenceDecrement,
+            permanenceDecay, FActivationThresholdMax, columnDimensions, cellsPerColumn, maxSynapsesToAddPer,
+            maxSynapsesPerSegment, equalityThreshold, numVectorSynapses, WMvectorScaleFactor )
 
-        self.workingMemory = WorkingMemory( FActivationThresholdMax, initialPosVariance, cellsPerColumn, WMEntryDecay, WMStabilityThreshold, WMStabilityPct, vectorDimensions )
-
-    def SendData( self, stateNumber, stateColour ):
+    def SendData( self, stateNumber ):
     # Return the active FCells as a list.
 
         for fCell in self.FCells:
             fCell.ReceiveStateData( stateNumber )
 
-        if len( self.stateOCellData ) > 0 and self.stateOCellData[ -1 ][ 0 ] == None:
-            self.stateOCellData[ -1 ][ 0 ] = stateColour
+#        if len( self.stateOCellData ) > 0 and self.stateOCellData[ -1 ][ 0 ] == None:
+#            self.stateOCellData[ -1 ][ 0 ] = stateColour
 
     def GetStateInformation( self ):
     # Get all the cells state information and return it.
@@ -210,7 +210,7 @@ class VectorMemory:
 
         # Feed working memory segments into OCells and get their activation.
         for entry in workingMemorySegments:
-            oCellsForSegment = self.OToFSegmentStruct.GetStimulatedCells( entry, [] )
+            oCellsForSegment = self.OToFSegmentStruct.GetStimulatedSegments( entry, [] )
             for actOCell in oCellsForSegment:
                 self.OCells[ actOCell ].AddActivation( self.OToFSegmentStruct.ThereCanBeOnlyOne( [ actOCell ] )[ 1 ] )
 
@@ -259,7 +259,7 @@ class VectorMemory:
             cell.predicted = False
 
         # Get the predicted FCells and make them predicted state.
-        self.predictedFCells = self.FToFSegmentStruct.GetStimulatedCells( self.activeFCells, vector )
+        self.predictedFCells = self.FToFSegmentStruct.GetStimulatedSegments( self.activeFCells, vector )
         for predCell in self.predictedFCells:
             self.FCells[ predCell ].predicted = True
 
@@ -274,15 +274,13 @@ class VectorMemory:
             exit()
 
         # Update working memory entry at this location.
-        stableBefore = self.workingMemory.reachedStability
         self.workingMemory.UpdateVectorAndReceiveColumns( lastVector, self.columnSDR )
-        stableAfter = self.workingMemory.reachedStability
 
         # Clear old active cells and get new ones active cells for this time step.
         self.ActivateFCells()
 
         # Update working memory entry at this location.
-        self.workingMemory.UpdateEntries( self.columnSDR, self.winnerFCells )
+        self.workingMemory.UpdateEntries( self.winnerFCells )
 
         # If any winner cell was not predicted then create a new segment to the lastActive FCells.
         for winCell in self.winnerFCells:
@@ -293,7 +291,7 @@ class VectorMemory:
         self.FToFSegmentStruct.SegmentLearning( self.FCells, self.lastWinnerFCells, True )
 
         # If working memory stability changed then modify OCell states.
-        if stableAfter:
+        if self.workingMemory.reachedStability:
             self.RefreshOCells()
             self.ActivateOCells()
         else:

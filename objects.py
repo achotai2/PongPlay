@@ -4,6 +4,7 @@ import datetime
 import os
 import matplotlib.pyplot as plt
 from bisect import bisect_left
+from logs_yo import AgentLog
 
 from agent_objects import AgentOrange
 
@@ -51,6 +52,8 @@ senseOrgan.goto( sensePosX, sensePosY )
 Agent1 = AgentOrange( 'Agent', senseResX, senseResY, 2, 1 )
 
 # Prepare log and report files--------------------------------------------------
+logFile = AgentLog( Agent1.ID )
+
 timeStep = 0
 start_date_and_time_string = str( datetime.datetime.now() )
 os.mkdir( "./Logs/" + start_date_and_time_string )
@@ -100,7 +103,7 @@ def AccumulateReportData( timeStep, boxColour ):
     if stateIndex == len( stateData ):
         stateData.append( [ 1, sensePosX, sensePosY, boxColour ] )
 
-    Agent1.SendStateData( stateIndex, boxColour )
+    Agent1.SendStateData( stateIndex )
 
     # Data for graph.
     numActiveCells, numActiveSegs, numPredictedCells = Agent1.GetGraphData()
