@@ -194,7 +194,7 @@ class Logging:
         # Gather state data.
         stateIndex    = 0
         while stateIndex < len( self.stateData ):
-            if all( [ self.stateData[ stateIndex ][ i ] == currState[ i ] for i in range( 1, len( currState ) ) ] ):
+            if all( [ self.stateData[ stateIndex ][ i + 1 ] == currState[ i ] for i in range( len( currState ) ) ] ):
                 self.stateData[ stateIndex ][ 0 ] += 1
                 break
             stateIndex += 1

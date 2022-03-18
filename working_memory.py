@@ -10,7 +10,7 @@ class WorkingMemory:
 
         self.WMToFSegments   = SegmentStructure( vectorDimensions, initialPermanence, permanenceIncrement, permanenceDecrement,
             permanenceDecay, activationThreshold, activationThreshold, columnDimensions, cellsPerColumn, maxSynapsesToAddPer,
-            maxSynapsesPerSegment, maxTimeSinceActive, equalityThreshold, numVectorSynapses, vectorRange, vectorScaleFactor )
+            maxSynapsesPerSegment, maxTimeSinceActive, equalityThreshold, numVectorSynapses, vectorRange, vectorScaleFactor, vectorScaleFactor )
 
         self.currentLocation = []
         for x in range( vectorDimensions ):
@@ -66,12 +66,12 @@ class WorkingMemory:
         else:
             self.reachedStability = False
 
-    def UpdateEntries( self, winnerCells ):
+    def UpdateEntries( self, winnerCells, lastActiveCells ):
     # Perform learning on working memory segments.
 
         if self.thisEntryIndex != None:
             # Perform learning on segments.
-            self.WMToFSegments.SegmentLearning( [], winnerCells, True )
+            self.WMToFSegments.SegmentLearning( [], winnerCells, lastActiveCells, True )
         else:
             self.WMToFSegments.CreateSegment( [], winnerCells, None, self.currentLocation, [] )
 

@@ -62,18 +62,19 @@ class AgentOrange:
             permanenceIncrement       = 0.04,
             permanenceDecrement       = 0.005,
             permanenceDecay           = 0.001,
-            segmentDecay              = 2000,
-            WMEntryDecay              = 25,
+            segmentDecay              = 99999,
             objectRepActivation       = 25,
             maxSynapsesToAddPer       = 5,
             maxSynapsesPerSegment     = 50,
-            equalityThreshold         = 30,
-            WMStabilityThreshold      = 3,
+            equalityThreshold         = 35,
             vectorDimensions          = vpsVectorDim,
             numVectorSynapses         = 500,
             vectorRange               = 800,
             vectorScaleFactor         = 0.8,
-            WMStabilityPct            = 0.9
+            initialVectorScaleFactor  = 0.8,
+            WMEntryDecay              = 25,
+            WMStabilityThreshold      = 25,
+            WMvectorScaleFactor       = 0.8
         )
 
         self.lastVector = []
@@ -225,8 +226,7 @@ class AgentOrange:
             self.newVector[ 1 ] = chosePos[ 1 ] - sensePosY
 
             # Append on the colour portion of the vector.
-            colourVector = objC - self.lastColour
-            self.newVector[ 2 ] = colourVector * 100
+            self.newVector[ 2 ] = ( objC - self.lastColour ) * 100
             self.lastColour = objC
 
         elif len( vpDesiredNewVector ) != len( self.newVector ):

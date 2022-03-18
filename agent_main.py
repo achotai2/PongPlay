@@ -40,7 +40,7 @@ class Agent:
             synPermInactiveDec         = 0.005,
             synPermActiveInc           = 0.04,
             synPermConnected           = 0.1,
-            boostStrength              = 3.0,
+            boostStrength              = 0.0,
             seed                       = -1,
             wrapAround                 = False
         )
@@ -72,16 +72,16 @@ class Agent:
             permanenceIncrement       = 0.04,
             permanenceDecrement       = 0.005,
             permanenceDecay           = 0.001,
-            segmentDecay              = 2000,
-            WMEntryDecay              = 25,
+            segmentDecay              = 99999,
             objectRepActivation       = 25,
             maxSynapsesToAddPer       = 5,
             maxSynapsesPerSegment     = 50,
-            equalityThreshold         = 30,
+            equalityThreshold         = 35,
             vectorDimensions          = vpsVectorDim,
             numVectorSynapses         = 500,
             vectorRange               = 1600,
             vectorScaleFactor         = 0.9,
+            WMEntryDecay              = 25,
             WMStabilityThreshold      = 25,
             WMvectorScaleFactor       = 0.8
         )
@@ -199,6 +199,9 @@ class Agent:
     def Brain ( self, paddleAX, paddleAY, paddleBX, paddleBY, ballX, ballY, ballVelX, ballVelY ):
     # Agents brain center.
 
+        self.senseX = self.senseX + self.newVector[ 0 ]
+        self.senseY = self.senseY + self.newVector[ 1 ]
+
         senseSDR = self.EncodeSenseData( paddleAY, paddleAX, paddleBY, paddleBX, ballX, ballY )
 
         self.lastVector = self.newVector.copy()
@@ -207,17 +210,13 @@ class Agent:
         self.vp.Compute( senseSDR, self.lastVector )
 
         # Generate random motion vector for next time step.
-        senseLocationBefore = ( self.senseX, self.senseY )
         senseOrganLocation = randrange( 3 )
         if senseOrganLocation == 0:
-            self.senseX = paddleAX
-            self.senseY = paddleAY
+            newSenseLocation = ( paddleAX, paddleAY )
         elif senseOrganLocation == 1:
-            self.senseX = paddleBX
-            self.senseY = paddleBY
+            newSenseLocation = ( paddleBX, paddleBY )
         elif senseOrganLocation == 2:
-            self.senseX = ballX
-            self.senseY = ballY
-        self.newVector = [ self.senseX - senseLocationBefore[ 0 ], self.senseY - senseLocationBefore[ 1 ] ]
+            newSenseLocation = ( ballX, ballY )
+        self.newVector = [ newSenseLocation[ 0 ] - self.senseX, newSenseLocation[ 1 ] - self.senseY ]
 
         self.vp.PredictFCells( self.newVector )
