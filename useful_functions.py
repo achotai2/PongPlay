@@ -152,17 +152,14 @@ def GenerateUnitySDR( SDRList, maxReturnSDRSize, cellsPerColumn ):
             if len( sortedCells[ c ] ) > 0:
                 chosenCell = sortedCells[ c ].pop( randrange( 0, len( sortedCells[ c ] ) ) )
                 break
-        if chosenCell == None:
-            print( "Something went wrong in GenerateUnitySDR()" )
-            exit()
-
-        i = bisect_left( returnSDR, chosenCell )
-        # Don't add the cell if we already have one from the same column.
-        if i == len( returnSDR ):
-            if i == 0 or int( returnSDR[ i - 1 ] / cellsPerColumn ) != int( chosenCell / cellsPerColumn ):
-                returnSDR.append( chosenCell )
-        elif int( returnSDR[ i ] / cellsPerColumn ) != int( chosenCell / cellsPerColumn ):
-            if i == 0 or int( returnSDR[ i - 1 ] / cellsPerColumn ) != int( chosenCell / cellsPerColumn ):
-                returnSDR.insert( i, chosenCell )
+        if chosenCell != None:
+            i = bisect_left( returnSDR, chosenCell )
+            # Don't add the cell if we already have one from the same column.
+            if i == len( returnSDR ):
+                if i == 0 or int( returnSDR[ i - 1 ] / cellsPerColumn ) != int( chosenCell / cellsPerColumn ):
+                    returnSDR.append( chosenCell )
+            elif int( returnSDR[ i ] / cellsPerColumn ) != int( chosenCell / cellsPerColumn ):
+                if i == 0 or int( returnSDR[ i - 1 ] / cellsPerColumn ) != int( chosenCell / cellsPerColumn ):
+                    returnSDR.insert( i, chosenCell )
 
     return returnSDR

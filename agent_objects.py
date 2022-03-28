@@ -68,13 +68,8 @@ class AgentOrange:
             maxSynapsesPerSegment     = 50,
             equalityThreshold         = 35,
             vectorDimensions          = vpsVectorDim,
-            numVectorSynapses         = 500,
-            vectorRange               = 800,
-            vectorScaleFactor         = 0.8,
-            initialVectorScaleFactor  = 0.8,
-            WMEntryDecay              = 25,
-            WMStabilityThreshold      = 25,
-            WMvectorScaleFactor       = 0.8
+            initialVectorScaleFactor  = 0.05,
+            initVectorConfidence      = 0.5
         )
 
         self.lastVector = []

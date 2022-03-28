@@ -1,13 +1,13 @@
 from bisect import bisect_left
-from random import uniform, choice, sample, randrange
+from random import uniform, choice, sample, randrange, shuffle
+from math import sqrt
 from collections import Counter
 from useful_functions import BinarySearch, NoRepeatInsort, ModThisSynapse, IndexIfItsIn, FastIntersect, GenerateUnitySDR
 
 class Segment:
 
-    def __init__( self, dimensions, incidentCellsList, incidentColumns, terminalCell, vector, vectorCells,
-        initialActivationThreshold, initialPermanence, permanenceIncrement, permanenceDecrement, numVectorSynapses,
-        vectorRange, vectorSynapseScaleFactor, initVectorScaleFactor ):
+    def __init__( self, dimensions, incidentCellsList, incidentColumns, terminalCell, vector, initialActivationThreshold,
+        vectorDistanceScaler, vectorConfidence ):
     # Initialize the inidividual segment structure class.
 
         self.active              = True                         # True means it's predictive, and above threshold terminal cells fired.
@@ -25,92 +25,41 @@ class Segment:
         self.incidentActivation  = []           # A list of all cells that last overlapped with incidentSynapses.
 
         # Vector portion.
-        self.dimensions               = dimensions         # Number of dimensions vector positions will be in.
-        self.numVectorSynapses        = numVectorSynapses
-        self.vectorSynapseScaleFactor = vectorSynapseScaleFactor
-        self.vectorRange              = []
-        for d in range( self.dimensions ):
-            self.vectorRange.append( [ -vectorRange, vectorRange ] )
-        self.permanenceIncrement      = permanenceIncrement
-        self.permanenceDecrement      = permanenceDecrement
+        self.dimensions       = dimensions                  # Number of dimensions vector positions will be in.
+        self.distanceScaler   = vectorDistanceScaler        # The stretch on the distance scale, a value between 0.0 and 1.0. Smaller # stretches further.
+        self.vectorConfidence = vectorConfidence            # The strength of confidence in the vector, a value between 0.0 and 1.0. Smaller # means less amplitude.
+        self.vectorCenter     = vector                      # The origin of the vector.
 
-        self.relativePosition         = [ 0 ] * self.dimensions
-
-        if vector != None:
-            if len( vector ) != dimensions:
-                print( "Vector sent to create segment not of same dimensions sent." )
-                exit()
-
-            self.vectorSynapses = []
-# MIGHT NEED TO ADD A SCALE FUNCTION, AND RANGE FUNCTION INTO THIS LATER.
-            for x in range( self.dimensions ):
-                thisDim = [ 0.0 ] * self.numVectorSynapses
-                self.vectorSynapses.append( thisDim )
-            for y in range( self.dimensions ):
-                self.ChangeVectorStrength( y, vector[ y ], initialPermanence, initVectorScaleFactor )
-
-            for i in range( self.dimensions ):
-                self.relativePosition[ i ] = vector[ i ]
-        else:
-            self.vectorSynapses = vectorCells
-
-    def GetVectorSynapseIndex( self, whichDim, position ):
-    # Returns the index in self.vectorSynapses for position.
-
-        if position < self.vectorRange[ whichDim ][ 0 ] or position > self.vectorRange[ whichDim ][ 1 ]:
-            print( "Sent position to GetVectorSynapseIndex() outside allowed range." )
+        if len( vector ) != dimensions:
+            print( "Vector sent to create segment not of same dimensions sent." )
             exit()
-
-        rangeMin   = self.vectorRange[ whichDim ][ 0 ]
-        rangeMax   = self.vectorRange[ whichDim ][ 1 ]
-        totalRange = rangeMax - rangeMin
-
-        return int( ( ( position - rangeMin ) / totalRange ) * self.numVectorSynapses )
-
-    def ChangeVectorStrength( self, whichDim, position, permanenceAdjust, scaleFactor ):
-    # Modifies declared vector position by permanenceAdjust, and smooths this out.
-
-        synIndex = self.GetVectorSynapseIndex( whichDim, position )
-
-        synModif = 0
-        thisPermAdjust = permanenceAdjust
-        while synIndex + synModif < len( self.vectorSynapses[ whichDim ] ):
-            self.vectorSynapses[ whichDim ][ synIndex + synModif ] = ModThisSynapse( self.vectorSynapses[ whichDim ][ synIndex + synModif ], thisPermAdjust, True )
-            thisPermAdjust = thisPermAdjust * scaleFactor
-            if thisPermAdjust < 0.01:
-                break
-            synModif += 1
-
-        synModif = 1
-        thisPermAdjust = permanenceAdjust * self.vectorSynapseScaleFactor
-        while synIndex - synModif >= 0:
-            self.vectorSynapses[ whichDim ][ synIndex - synModif ] = ModThisSynapse( self.vectorSynapses[ whichDim ][ synIndex - synModif ], thisPermAdjust, True )
-            thisPermAdjust = thisPermAdjust * scaleFactor
-            if thisPermAdjust < 0.01:
-                break
-            synModif += 1
 
     def Inside( self, vector ):
-    # Checks if given vector position is inside range.
+    # Checks if given vector position is inside range. Calculates this based on a score between 0.0 and 1.0, which is used as a probability.
+
+        # Calculate vector probability.
+        probabilityScore = self.ReturnVectorScore( vector )
+        randomScore = uniform( 0, 1 )
+
+        if probabilityScore >= randomScore:
+            return True
+        else:
+            return False
+
+    def ReturnVectorScore( self, vector ):
+    # Returns the score for a given vector position.
 
         if len( vector ) != self.dimensions:
-            print( "Vector sent to Inside() not of same dimensions as Segment." )
+            print( "Vector sent to ReturnVectorScore() not of same dimensions as Segment." )
             exit()
 
-        for x in range( self.dimensions ):
-            # Decay all synapses by a bit.
-            for syn in range( self.numVectorSynapses ):
-                self.vectorSynapses[ x ][ syn ] = ModThisSynapse( self.vectorSynapses[ x ][ syn ], -self.permanenceDecrement, True )
-
+        # Calculate the distance from this vector to our self.vectorCenter.
+        sum = 0
         for i in range( self.dimensions ):
-            synIndex = self.GetVectorSynapseIndex( i, vector[ i ] )
-            if self.vectorSynapses[ i ][ synIndex ] == 0.0:
-                return False
+            sum += ( self.vectorCenter[ i ] - vector[ i ] ) ** 2
+        distance = sqrt( sum )
 
-            # Increase the synapses around the vector position.
-            self.ChangeVectorStrength( x, vector[ x ], self.permanenceIncrement, self.vectorSynapseScaleFactor )
-
-        return True
+        return -1 * ( self.distanceScaler * distance ) ** 2 + self.vectorConfidence
 
     def IncidentCellActive( self, incidentCell ):
     # Takes the incident cell and adds it to incidentActivation.
@@ -122,31 +71,19 @@ class Segment:
     # If so make myself active. Return my overlap.
 
         if self.Inside( vector ):
+            self.activeInside = True
+
             overlap = len( FastIntersect( self.incidentColumns, columnSDR ) )
 
             if overlap >= self.activationThreshold:
-                self.active          = True
                 self.stable          = True
-                self.timeSinceActive = 0
-                return overlap
+                return self.incidentSynapses
             else:
                 self.stable          = False
-
-        self.active = False
-        return None
-
-    def UpdateRelativePosition( self, vector ):
-    # Update the relativePosition, and check if it is Inside.
-
-        for d in range( self.dimensions ):
-            self.relativePosition[ d ] += vector[ d ]
-
-        if self.Inside( self.relativePosition ):
-            self.activeInside = True
-            return self.incidentSynapses
         else:
             self.activeInside = False
-            return []
+
+        return None
 
     def CheckActivation( self, vector ):
     # Checks the incidentActivation against activationThreshold to see if segment becomes active.
@@ -156,17 +93,11 @@ class Segment:
 
             if self.activeInside or self.Inside( vector ):
                 self.active          = True
-                self.stable          = True
-
-                # Set the relativePosition as the vector.
-                for d in range( self.dimensions ):
-                    self.relativePosition[ d ] = vector[ d ]
-
                 self.timeSinceActive = 0
-                return self.terminalSynapse, self.stable
+                return True
 
         self.active = False
-        return None, self.stable
+        return False
 
     def RefreshSegment( self ):
     # Updates or refreshes the state of the segment.
@@ -236,11 +167,6 @@ class Segment:
 
         self.activationThreshold = ( ( minActivation - maxActivation ) * 2 ** ( -1 * numWinners ) ) + maxActivation
 
-    def ReturnVectorCells( self ):
-    # Returns the vector cell permanences as a list.
-
-        return self.vectorSynapses.copy()
-
     def CellForColumn( self, column ):
     # Return the cell for the column.
 
@@ -254,9 +180,9 @@ class Segment:
 
 class SegmentStructure:
 
-    def __init__( self, vectorDimensions, initialPermanence, permanenceIncrement, permanenceDecrement, permanenceDecay,
-        activeThresholdMin, activeThresholdMax, incidentColumnDimensions, incidentCellsPerColumn, maxSynapsesToAddPer,
-        maxSynapsesPerSegment, maxTimeSinceActive, equalityThreshold, numVectorSynapses, vectorRange, vectorScaleFactor, initVectorScaleFactor ):
+    def __init__( self, vectorDimensions, initialPermanence, permanenceIncrement, permanenceDecrement, permanenceDecay, activeThresholdMin,
+        activeThresholdMax, incidentColumnDimensions, incidentCellsPerColumn, maxSynapsesToAddPer, maxSynapsesPerSegment, maxTimeSinceActive,
+        equalityThreshold, initVectorScaleFactor, initVectorConfidence ):
     # Initialize the segment storage and handling class.
 
         self.dimensions            = vectorDimensions
@@ -272,16 +198,13 @@ class SegmentStructure:
         self.maxSynapsesPerSegment = maxSynapsesPerSegment
         self.maxTimeSinceActive    = maxTimeSinceActive
         self.equalityThreshold     = equalityThreshold
-        self.numVectorSynapses     = numVectorSynapses
-        self.vectorRange           = vectorRange
-        self.vectorScaleFactor     = vectorScaleFactor
         self.initVectorScaleFactor = initVectorScaleFactor
+        self.initVectorConfidence  = initVectorConfidence
 
         self.segments       = []                                  # Stores all segments structures.
         self.activeSegments = []
-        self.stableSegments = []
 
-        self.bestCells      = []
+        self.bestCells      = [ [] for i in range( incidentColumnDimensions ) ]
 
         self.segsToDelete   = []
 
@@ -291,6 +214,14 @@ class SegmentStructure:
         self.incidentPermanences = []
         for cell in range( incidentCellsPerColumn * incidentColumnDimensions ):
             self.incidentPermanences.append( [] )
+
+        # Working Memory portion.-----------------------------------------------
+        self.numPositionCells   = 100
+        self.maxPositionRange   = 800
+        self.positionCellScores = [ [ [ [], [], [], [] ] for i in range( incidentCellsPerColumn ) ] for j in range( incidentColumnDimensions) ]
+        self.currentPosition    = []
+        for d in range( vectorDimensions ):
+            self.currentPosition.append( 0 )
 
     def HowManyActiveSegs( self ):
     # Return the number of active segments.
@@ -356,24 +287,31 @@ class SegmentStructure:
                     self.activeSegments[ actIndex ] -= 1
                     actIndex += 1
 
-                staIndex = bisect_left( self.stableSegments, segIndex )
-                if staIndex != len( self.stableSegments ) and self.stableSegments[ staIndex ] == segIndex:
-                    del self.stableSegments[ staIndex ]
-                while staIndex < len( self.stableSegments ):
-                    self.stableSegments[ staIndex ] -= 1
-                    staIndex += 1
+                # Delete references to this segment in self.positionCellScores.
+                terminalCell = int( self.segments[ segIndex ].terminalSynapse % self.cellsPerColumn )
+                terminalCol  = int( self.segments[ segIndex ].terminalSynapse / self.cellsPerColumn )
+                posIndex = bisect_left( self.positionCellScores[ terminalCol ][ terminalCell ][ 0 ], segIndex )
+                if ( posIndex != len( self.positionCellScores[ terminalCol ][ terminalCell ][ 0 ] ) and
+                    self.positionCellScores[ terminalCol ][ terminalCell ][ 0 ][ posIndex ] == segIndex ):
+                    del self.positionCellScores[ terminalCol ][ terminalCell ][ 0 ][ posIndex ]
+                    del self.positionCellScores[ terminalCol ][ terminalCell ][ 1 ][ posIndex ]
+                    del self.positionCellScores[ terminalCol ][ terminalCell ][ 2 ][ posIndex ]
+                # Modify all segment indices greater than to be minus one.
+                for column in range( self.columnDimensions ):
+                    for cell in range( self.cellsPerColumn ):
+                        for entry in range( len( self.positionCellScores[ column ][ cell ][ 0 ] ) ):
+                            if self.positionCellScores[ column ][ cell ][ 0 ][ entry ] > segIndex:
+                                self.positionCellScores[ column ][ cell ][ 0 ][ entry ] -= 1
 
                 # Delete the segment.
                 del self.segments[ segIndex ]
 
         self.segsToDelete = []
 
-    def CreateSegment( self, Cells, incidentCellsList, terminalCell, vector, vectorCells ):
+    def CreateSegment( self, Cells, incidentCellsList, terminalCell, vector ):
     # Creates a new segment.
 
-        newSegment = Segment( self.dimensions, [], [], terminalCell, vector, vectorCells, self.activeThresholdMin,
-            self.initialPermanence, self.permanenceIncrement, self.permanenceDecrement, self.numVectorSynapses,
-            self.vectorRange, self.vectorScaleFactor, self.initVectorScaleFactor )
+        newSegment = Segment( self.dimensions, [], [], terminalCell, vector, self.activeThresholdMin, self.initVectorScaleFactor, self.initVectorConfidence )
         self.segments.append( newSegment )
 
         indexOfNew = len( self.segments ) - 1
@@ -439,28 +377,36 @@ class SegmentStructure:
 
         self.DeleteSegments( Cells )
 
-    def UpdateStableSegments( self, vector ):
+# CAN PROBABLY REMOVE THE BELOW FUNCTION.............................
+    def UpdateStableSegments( self, columnSDR, vector ):
     # Update the relativePosition of all stable segments. If any relativePosition is Inside then get its incident cells.
     # Use these incident cells to form bestCells list.
 
         # Update all the stable segments relativePositions, and check their relativePosition is Inside.
+        # If inside then check its column overlap to see if it stays stable.
         # Also generate the columns list of incident cells.
         columnsList = [ [] for i in range( self.columnDimensions ) ]
 
-#        print( "Vector: " + str( vector ) )
-        for stableSeg in self.stableSegments:
-            thisSegsIncident = self.segments[ stableSeg ].UpdateRelativePosition( vector )
+        noLongerStable = []
+        for staIndex, stableSeg in enumerate( self.stableSegments ):
+            self.segments[ stableSeg ].UpdateRelativePosition( vector )
+            thisSegsIncident = self.segments[ stableSeg ].CheckColumnOverlapAndVector( columnSDR, vector )
 
-#            print( "Segment #: " + str( stableSeg ) + ", relativePosition: " + str( self.segments[ stableSeg ].relativePosition ) + ", createdPosition: " + str( self.segments[ stableSeg ].createdPosition ) + ", " + str( self.segments[ stableSeg ].activeInside ) )
+            if thisSegsIncident == None:
+                noLongerStable.append( staIndex )
 
             # Add the returned incident cells list to the columns list.
-            for incCell in thisSegsIncident:
-                NoRepeatInsort( columnsList[ int( incCell / self.cellsPerColumn ) ], incCell )
+            else:
+                for incCell in thisSegsIncident:
+                    NoRepeatInsort( columnsList[ int( incCell / self.cellsPerColumn ) ], incCell )
+
+        for s in reversed( noLongerStable ):
+            del self.stableSegments[ s ]
 
         # Make the bestCells list, choosing for each column the cell that appears most - if tied then choose randomly.
-        self.bestCells = []
+        self.bestCells = [ [] for i in range( self.columnDimensions ) ]
 
-        for col in columnsList:
+        for colIndex, col in enumerate( columnsList ):
             if len( col ) > 0:
                 occuranceCount = Counter( col )
                 frequencyList = occuranceCount.most_common()
@@ -472,15 +418,10 @@ class SegmentStructure:
                     else:
                         if cell[ 1 ] == frequencyList[ 0 ][ 1 ]:
                             randomChoices.append( cell[ 0 ] )
-                NoRepeatInsort( self.bestCells, choice( randomChoices ) )
-
-        print( "bestCells: " + str( self.bestCells ) + "\n" )
+                self.bestCells[ colIndex ].append( choice( randomChoices ) )
 
     def GetStimulatedSegments( self, activeCells, vector ):
-    # Using the activeCells and vector find all segments that activate, and therefore all terminal cells that become
-    # stimulated by these segments. Return these stimulated cells as a list.
-
-        stimulatedCells = []
+    # Using the activeCells and vector find all segments that activate. Add these segments to a list and return it.
 
         if len( self.incidentSegments ) > 0:
             # Activate the synapses in segments using activeCells.
@@ -490,15 +431,234 @@ class SegmentStructure:
 
             # Check the overlap of all segments and see which ones are active, and add the terminalCell to stimulatedCells.
             for segIndex, segment in enumerate( self.segments ):
-                cellIfActive, isStable = segment.CheckActivation( vector )
-                if cellIfActive != None:
+                if segment.CheckActivation( vector ):
                     NoRepeatInsort( self.activeSegments, segIndex )
-                    NoRepeatInsort( stimulatedCells, cellIfActive )
-                if isStable:
-                    NoRepeatInsort( self.stableSegments, segIndex )
 
-        return stimulatedCells
+        predictedCells = []
+        for actSeg in self.activeSegments:
+            NoRepeatInsort( predictedCells, self.segments[ actSeg ].terminalSynapse )
 
+        return predictedCells
+
+    def UpdateVector( self, vector ):
+    # Use the vector to update the local workingMemory position.
+
+        if len( vector ) != self.dimensions:
+            print( "Vectors sent to working memory of wrong size." )
+            exit()
+
+        # Update vector.
+        for d in range( self.dimensions ):
+            self.currentPosition[ d ] += vector[ d ]
+
+# CAN REMOVE BELOW FUNCTION I THINK...............................
+    def GetIndexFromPosition( self, coordinates ):
+    # Given the position calculate and return the indices for our position list.
+
+        screenSize = self.vectorRange * 0.5
+
+        indices = []
+
+        for i in range( self.dimensions ):
+            indices.append( int( ( ( coordinates[ i ] + ( screenSize * 0.5 ) ) / screenSize ) * self.numPositionCells ) )
+
+        return indices
+
+# CAN REMOVE BELOW FUNCTION I THINK...............................
+    def GetPositionFromIndex( self, indices ):
+    # Given self.positionCellScores indices, get us the approximate screen position.
+
+        coordinates = []
+
+        for i in range( self.dimensions ):
+            coordinates.append( int( ( ( indices[ i ] / self.numPositionCells ) * self.maxPositionRange ) - ( self.maxPositionRange * 0.5 ) ) )
+
+        return coordinates
+
+    def UpdateWorkingMemory( self, vector ):
+    # Given this time steps active segments, update self.positionCellScores.
+
+        # Go through every active segment and get their scores.
+        for actSeg in self.activeSegments:
+            terminalCell = int( self.segments[ actSeg ].terminalSynapse % self.cellsPerColumn )
+            terminalCol  = int( self.segments[ actSeg ].terminalSynapse / self.cellsPerColumn )
+            overlapScore = len( self.segments[ actSeg ].incidentActivation )
+
+            index = bisect_left( self.positionCellScores[ terminalCol ][ terminalCell ][ 0 ], actSeg )
+
+            if index == len( self.positionCellScores[ terminalCol ][ terminalCell ][ 0 ] ):
+                self.positionCellScores[ terminalCol ][ terminalCell ][ 0 ].append( actSeg )
+                self.positionCellScores[ terminalCol ][ terminalCell ][ 1 ].append( 1 )
+                self.positionCellScores[ terminalCol ][ terminalCell ][ 2 ].append( overlapScore )
+#                self.positionCellScores[ terminalCol ][ terminalCell ][ 2 ].append( 0.5 )
+                self.positionCellScores[ terminalCol ][ terminalCell ][ 3 ].append( self.currentPosition.copy() )
+            elif self.positionCellScores[ terminalCol ][ terminalCell ][ 0 ][ index ] == actSeg:
+                self.positionCellScores[ terminalCol ][ terminalCell ][ 1 ][ index ] += 1
+                self.positionCellScores[ terminalCol ][ terminalCell ][ 2 ][ index ] += overlapScore
+                for d in range( self.dimensions ):
+                    self.positionCellScores[ terminalCol ][ terminalCell ][ 3 ][ index ][ d ] += self.currentPosition[ d ]
+            else:
+                self.positionCellScores[ terminalCol ][ terminalCell ][ 0 ].insert( index, actSeg )
+                self.positionCellScores[ terminalCol ][ terminalCell ][ 1 ].insert( index, 1 )
+                self.positionCellScores[ terminalCol ][ terminalCell ][ 2 ].insert( index, overlapScore )
+#                self.positionCellScores[ terminalCol ][ terminalCell ][ 2 ].insert( index, 0.5 )
+                self.positionCellScores[ terminalCol ][ terminalCell ][ 3 ].insert( index, self.currentPosition.copy() )
+
+        self.UpdateVector( vector )
+
+    def GetWinnerCellForColumn( self, column ):
+    # Given the current position, and given column, find each cells highest score.
+    # Sort the cells in the column by score and return this sorted list (from highest score to lowest).
+
+        cellList   = [ i for i in range( self.cellsPerColumn ) ]
+        shuffle( cellList )
+        cellScores = [ 0.0 ] * self.cellsPerColumn
+        cellOverlap = [ None ] * self.cellsPerColumn
+
+        # Go through the cells in this column in self.positionCellScores.
+        for cellIndex, cell in enumerate( cellList ):
+            thisEntry = self.positionCellScores[ column ][ cell ]
+
+            for seg in range( len( thisEntry[ 1 ] ) ):
+                segIndex       = thisEntry[ 1 ][ seg ]
+
+                avgVector      = []
+                for d in range( self.dimensions ):
+                    avgIncidentPosD = thisEntry[ 3 ][ seg ][ d ] / thisEntry[ 1 ][ seg ]
+                    avgVector.append( self.currentPosition[ d ] - avgIncidentPosD )
+
+                thisVectorScore = self.segments[ segIndex ].ReturnVectorScore( avgVector )
+#                overlapAverage = thisEntry[ 2 ][ seg ] / thisEntry[ 1 ][ seg ]
+#                overlapAverage = self.ReturnActivation( segIndex )
+                overlapAverage = 1
+
+                # Calculate the score for this segment.
+                thisScore = thisVectorScore * overlapAverage
+
+                if thisScore > cellScores[ cellIndex ]:
+                    cellScores[ cellIndex ] = thisScore
+                    cellOverlap[ cellIndex ] = segIndex
+
+        # Sort the cells by score.
+        sortedCellsList = []
+        sortedSegList   = []
+        while len( cellList ) > 0:
+            winnerIndex  = 0
+            highestScore = cellScores[ 0 ]
+            for celI, sco in enumerate( cellScores ):
+                if sco > highestScore:
+                    winnerIndex  = celI
+                    highestScore = sco
+            sortedCellsList.append( cellList[ winnerIndex ] + ( column * self.cellsPerColumn ) )
+            sortedSegList.append( winnerIndex )
+            del cellList[ winnerIndex ]
+            del cellScores[ winnerIndex ]
+
+        # Support the score for the winner, and decrease others.
+#        if cellOverlap[ sortedSegList[ 0 ] ] != None:
+#            self.segments[ cellOverlap[ sortedSegList[ 0 ] ] ].vectorConfidence += 0.05
+#        for c in range( 1, self.cellsPerColumn ):
+#            if cellOverlap[ sortedSegList[ c ] ] != None:
+#                self.segments[ cellOverlap[ sortedSegList[ c ] ] ].vectorConfidence -= 0.05
+
+        return sortedCellsList
+
+# CAN REMOVE BELOW FUNCTION I THINK...............................
+    def CalculatePredictedScores( self, vector ):
+    # Using the active segments, gather their terminal cells and return it.
+    # Also, for each such terminal cell, calculate its position scores, insert it into the list, and return this.
+
+
+        allPosScores = []
+        for x in range( self.numPositionCells ):
+            allPosScores.append( [] )
+            for y in range( self.numPositionCells ):
+                allPosScores[ x ].append( [] )
+                for c in range( self.numPositionCells ):
+                    thisPosition = self.GetPositionFromIndex( [ x, y, c ] )
+                    thisVector   = []
+                    for i in range( self.dimensions ):
+                        thisVector.append( thisPosition[ i ] - self.currentPosition[ i ] )
+
+                    segPosScore = self.segments[ actSeg ].ReturnVectorScore( thisVector )
+                    allPosScores[ x ][ y ].append( segPosScore )
+
+
+        for cell in newPositionCellScores:
+            columnEntry = self.positionCellScores[ int( cell[ 0 ] / self.FCellsPerColumn ) ]
+
+            # Using the pre-existing cell entries for this column update the average score; or create a new entry.
+            cellIndex = 0
+            while cellIndex < len( columnEntry ):
+                if columnEntry[ cellIndex ][ 0 ] == cell[ 0 ]:
+                    break
+                else:
+                    cellIndex += 1
+
+            if cellIndex == len( columnEntry ):
+                # Calculate weighted average.
+                newScores = [ [] for i in range( self.vectorDimensions ) ]
+                for d in range( self.vectorDimensions ):
+                    for x in range( self.numVectorSynapses ):
+                         newScores[ d ].append( cell[ 2 ][ d ][ x ] / cell[ 1 ] )
+
+                columnEntry.append( [ cell[ 0 ], cell[ 1 ], newScores ] )        # [ Terminal Cell, Count, Position Scores ]
+            else:
+                newScores = [ [] for i in range( self.vectorDimensions ) ]
+                for d in range( self.vectorDimensions ):
+                    for x in range( self.numVectorSynapses ):
+                         newScores[ d ].append( ( ( columnEntry[ cellIndex ][ 1 ] * columnEntry[ cellIndex ][ 2 ][ d ][ x ] ) + cell[ 2 ][ d ][ x ] ) / ( columnEntry[ cellIndex ][ 1 ] + cell[ 1 ] ) )
+
+                columnEntry[ cellIndex ][ 1 ] += cell[ 1 ]
+                columnEntry[ cellIndex ][ 2 ] = newScores
+
+
+
+
+
+
+        for actSeg in self.activeSegments:
+            terminalCell = self.segments[ actSeg ].terminalSynapse
+
+            # Calculate the score.
+            overlapScore  = len( self.segments[ actSeg ].incidentActivation )
+            vectorCells   = self.segments[ actSeg ].ReturnVectorCells()
+            cellScore     = [ [] for d in range( self.dimensions ) ]
+            for d in range( self.dimensions ):
+                for x in range( self.numVectorSynapses ):
+                    cellScore[ d ].append( overlapScore * vectorCells[ d ][ x ] )
+
+            # Add the terminal cell.
+            cellIndex = bisect_left( terminalCellsList, terminalCell )
+            if cellIndex == len( terminalCellsList ):
+                terminalCellsList.append( terminalCell )
+
+                columnScoreList.append( [ terminalCell, 1, cellScore ] )
+
+            elif terminalCellsList[ cellIndex ] != terminalCell:
+                terminalCellsList.insert( cellIndex, terminalCell )
+
+                columnScoreList.insert( cellIndex, [ terminalCell, 1, cellScore ] )
+
+            else:
+                columnScoreList[ cellIndex ][ 1 ] += 1
+
+                for d in range( self.dimensions ):
+                    for x in range( self.numVectorSynapses ):
+                        columnScoreList[ cellIndex ][ 2 ][ d ][ x ] += cellScore[ d ][ x ]
+
+        return terminalCellsList, columnScoreList
+
+# CAN REMOVE BELOW FUNCTION I THINK...............................
+    def GetCellForColumn( self, column ):
+    # Returns the cell for the given column from self.bestCells.
+
+        if len( self.bestCells[ column ] ) > 0:
+            return self.bestCells[ column ][ 0 ]
+        else:
+            return None
+
+# CAN REMOVE BELOW FUNCTION I THINK...............................
     def CheckSegmentColumnOverlap( self, columnSDR, vector ):
     # Checks all segments if their columns overlap with columnSDR above threshold.
     # Also check if their vector activates. Those that do make them active.
@@ -515,6 +675,7 @@ class SegmentStructure:
             NoRepeatInsort( self.activeSegments, mostSegment )
         return mostSegment
 
+# CAN PROBABLY REMOVE THE BELOW FUNCTION.............................
     def CellForColumn( self, segIndex, column ):
     # Return cell for column for indexed segment.
 
@@ -539,17 +700,12 @@ class SegmentStructure:
     # 4.) Build new synapses to active incident winner cells that don't have synapses.
 
         # Modify the stable synapses.
-        noLongerStable = []
-        for ssIndex, stableSeg in enumerate( self.stableSegments ):
-            if self.segments[ stableSeg ].activeInside and not Cells[ self.segments[ stableSeg ].terminalSynapse ].active:
-                self.segments[ stableSeg ].stable = False
+#        for ssIndex, stableSeg in enumerate( self.stableSegments ):
+#            if self.segments[ stableSeg ].activeInside and not Cells[ self.segments[ stableSeg ].terminalSynapse ].active:
+#                self.segments[ stableSeg ].stable = False
 
 #                for incCell in self.segments[ stableSeg ].incidentSynapses:
 #                    self.ChangePermanence( incCell, stableSeg, -self.permanenceDecrement )
-
-                noLongerStable.append( ssIndex )
-        for s in reversed( noLongerStable ):
-            del self.stableSegments[ s ]
 
         # Then deal with active segments.
         for activeSeg in self.activeSegments:
@@ -594,7 +750,7 @@ class SegmentStructure:
 
         activation = 0.0
 
-        for incCell in self.segments[ seg ].incidentActivation:
+        for incCell in self.segments[ seg ].incidentSynapses:
             entryIndex = IndexIfItsIn( self.incidentSegments[ incCell ], seg )
             if entryIndex != None:
                 activation += self.incidentPermanences[ incCell ][ entryIndex ]
@@ -645,13 +801,17 @@ class SegmentStructure:
                 else:
                     segmentGroupings[ chosenIndex ].append( index )
 
+# THIS COULD PROBABLY BE MADE BETTER BY MERGING THEM, RATHER THAN JUST DELETING ONE.
         for group in segmentGroupings:
             if len( group ) > 1:
-                SDRList     = [ self.segments[ group[ i ] ].incidentSynapses for i in range( len( group) ) ]
-                unitySDR    = GenerateUnitySDR( SDRList, len( SDRList[ 0 ] ), self.cellsPerColumn )
-                unityVector = self.UnifyVectors( [ self.segments[ group[ k ] ].ReturnVectorCells() for k in range( len( group ) ) ] )
+#                SDRList     = [ self.segments[ group[ i ] ].incidentSynapses for i in range( len( group) ) ]
+#                unitySDR    = GenerateUnitySDR( SDRList, len( SDRList[ 0 ] ), self.cellsPerColumn )
 
-                self.CreateSegment( Cells, unitySDR, self.segments[ group[ 0 ] ].terminalSynapse, None, unityVector )
+                winnerSegment = group.pop( randrange( len( group ) ) )
+
+#                unityVector = self.UnifyVectors( [ self.segments[ group[ k ] ].ReturnVectorCells() for k in range( len( group ) ) ] )
+
+#                self.CreateSegment( Cells, unitySDR, self.segments[ group[ 0 ] ].terminalSynapse, None )
 
                 for segIndex in range( len( group ) ):
                     self.segsToDelete.append( group[ segIndex ] )
