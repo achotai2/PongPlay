@@ -99,12 +99,12 @@ def FastIntersect( list1, list2 ):
 
     return intersection
 
-def ModThisSynapse( currentValue, howMuch, notIfOne ):
+def ModThisSynapse( currentValue, howMuch, maxValue, minValue, notIfMax ):
 # Modify the synapse value and do checks, then return new value.
 
     newValue = currentValue
 
-    if ( notIfOne and newValue == 1.0 ) or ( newValue == 0.0 and howMuch < 0.0 ):
+    if ( notIfMax and newValue == 1.0 ) or ( newValue == 0.0 and howMuch < 0.0 ):
         return newValue
 
     newValue += howMuch

@@ -69,7 +69,8 @@ class AgentOrange:
             equalityThreshold         = 35,
             vectorDimensions          = vpsVectorDim,
             initialVectorScaleFactor  = 0.05,
-            initVectorConfidence      = 0.5
+            initVectorConfidence      = 0.3,
+            maxNonFeeling             = 0.5
         )
 
         self.lastVector = []

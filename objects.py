@@ -67,13 +67,13 @@ while True:
 
     logFile.AddToTimeStep()
 
-    if int( logFile.timeStep / 1000 ) % 3 == 1:
+    if int( logFile.timeStep / 100 ) % 3 == 1:
         boxColour = 2
         box.color( "green" )
-    elif int( logFile.timeStep / 1000 ) % 3 == 2:
+    elif int( logFile.timeStep / 100 ) % 3 == 2:
         boxColour = 3
         box.color( "blue" )
-    elif int( logFile.timeStep / 1000 ) % 3 == 0:
+    elif int( logFile.timeStep / 100 ) % 3 == 0:
         boxColour = 1
         box.color( "red" )
 
