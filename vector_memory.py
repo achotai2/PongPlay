@@ -1,6 +1,7 @@
 from random import sample, randrange
 from operator import add
 from cell_and_synapse import FCell, OCell, SegmentStructure
+from working_memory import WorkingMemory
 from useful_functions import NoRepeatInsort, BinarySearch
 #import numpy as np
 #from time import time
@@ -9,7 +10,7 @@ class VectorMemory:
 
     def __init__( self, columnDimensions, cellsPerColumn, numObjectCells, FActivationThresholdMin, FActivationThresholdMax,
         initialPermanence, permanenceIncrement, permanenceDecrement, permanenceDecay, segmentDecay, objectRepActivation,
-        maxSynapsesToAddPer, maxSynapsesPerSegment, equalityThreshold, vectorDimensions, initialVectorScaleFactor, initVectorConfidence, maxNonFeeling ):
+        maxSynapsesToAddPer, maxSynapsesPerSegment, equalityThreshold, vectorDimensions, initialVectorScaleFactor, initVectorConfidence ):
 
         self.columnDimensions        = columnDimensions         # Dimensions of the column space.
         self.FCellsPerColumn         = cellsPerColumn           # Number of cells per column.
@@ -29,7 +30,6 @@ class VectorMemory:
         self.vectorDimensions        = vectorDimensions         # The number of dimensions of our vector space.
         self.initVectorScaleFactor   = initialVectorScaleFactor
         self.initVectorConfidence    = initVectorConfidence
-        self.maxNonFeeling           = maxNonFeeling
 
         # Create column SDR storage.
         self.columnSDR       = []
@@ -49,7 +49,9 @@ class VectorMemory:
          # Stores and deals with all FCell to FCell segments.
         self.FToFSegmentStruct = SegmentStructure( vectorDimensions, initialPermanence, permanenceIncrement, permanenceDecrement, permanenceDecay,
             FActivationThresholdMin, FActivationThresholdMax, columnDimensions, cellsPerColumn, maxSynapsesToAddPer, maxSynapsesPerSegment,
-            segmentDecay, equalityThreshold, initialVectorScaleFactor, initVectorConfidence, maxNonFeeling  )
+            segmentDecay, equalityThreshold, initialVectorScaleFactor, initVectorConfidence )
+
+        self.workingMemory = WorkingMemory( 30, 10, cellsPerColumn, 25, 3, 1.0, vectorDimensions )
 
         # Create cells in object layer.
         self.OCells = []
@@ -98,8 +100,8 @@ class VectorMemory:
 
         log_data.append( "Predicted Cells: " + str( len( self.predictedFCells ) ) + ", " + str( self.predictedFCells ) )
 
-#        log_data.append( "Working Memory Entries: " + str( self.workingMemory ) )
-#        log_data.append( "Working Memory Stable: " + str( self.workingMemory.reachedStability ) )
+        log_data.append( "Working Memory Entries: " + str( self.workingMemory ) )
+        log_data.append( "Working Memory Stable: " + str( self.workingMemory.reachedStability ) )
 
         log_data.append( "# of FToF-Segments: " + str( len( self.FToFSegmentStruct.segments ) ) + ", # of Active Segments: " + str( len( self.FToFSegmentStruct.activeSegments ) ) )
 
@@ -133,7 +135,7 @@ class VectorMemory:
             winnerThisColumn = -1
 
             # Get working memories suggestion for this column.
-            wmCells = self.FToFSegmentStruct.GetWinnerCellForColumn( col )
+            wmCell = self.workingMemory.GetCellForColumn( col )
 
             # Check if any cells in column are predicted. If yes then make a note of them.
             for cell in range( col * self.FCellsPerColumn, ( col * self.FCellsPerColumn ) + self.FCellsPerColumn ):
@@ -141,14 +143,17 @@ class VectorMemory:
                     predictedCellsThisCol.append( cell )
 
             # If result was predicted by FCells or working memory...
-            if len( predictedCellsThisCol ) > 0:
+            if len( predictedCellsThisCol ) > 0 or ( self.workingMemory.reachedStability and wmCell != None ):
                 self.notBurstingCols.append( col )
 
-                for winCell in wmCells:
-                    if BinarySearch( predictedCellsThisCol, winCell ):
-                        activeThisColumn.append( winCell )
-                        break
-                winnerThisColumn = activeThisColumn[ -1 ]
+                # If working memory is stable then it selects the winner.
+                if self.workingMemory.reachedStability and wmCell != None:
+                    activeThisColumn.append( wmCell )
+                    winnerThisColumn = wmCell
+                # Otherwise select from predictedCellsThisCol the cell with most activation.
+                else:
+                    activeThisColumn.append( self.FToFSegmentStruct.ThereCanBeOnlyOne( predictedCellsThisCol )[ 0 ] )
+                    winnerThisColumn = activeThisColumn[ -1 ]
 
             # If result wasn't predicted by FCells...
             else:
@@ -158,8 +163,12 @@ class VectorMemory:
                 for cell in range( col * self.FCellsPerColumn, ( col * self.FCellsPerColumn ) + self.FCellsPerColumn ):
                     activeThisColumn.append( cell )
 
-                # If working memory has a prediction for this column then make it the winner. It'll be random anyways.
-                winnerThisColumn = wmCells[ 0 ]
+                # If working memory has a prediction for this column then make it the winner.
+                if wmCell != None:
+                    winnerThisColumn = wmCell
+                # If not then select a random cell in column as winner.
+                else:
+                    winnerThisColumn = randrange( col * self.FCellsPerColumn, ( col * self.FCellsPerColumn ) + self.FCellsPerColumn )
 
             # Make the chosen cells active and winners.
             if len( activeThisColumn ) > 0:
@@ -183,19 +192,20 @@ class VectorMemory:
         for cell in self.FCells:
             cell.predicted = False
 
-        if vector[ 2 ] == 0:
-            # Get the predicted FCells and make them predicted state.
-            self.predictedFCells = self.FToFSegmentStruct.GetStimulatedSegments( self.activeFCells, vector )
+        # Get the predicted FCells and make them predicted state.
+        self.predictedFCells = self.FToFSegmentStruct.GetStimulatedSegments( self.activeFCells, vector )
 
-            # Make the selected cells predicted state.
-            for predCell in self.predictedFCells:
-                self.FCells[ predCell ].predicted = True
+        # Make the selected cells predicted state.
+        for predCell in self.predictedFCells:
+            self.FCells[ predCell ].predicted = True
+
+    def ResetWorkingMemory( self ):
+    # Clear working memory entries.
+
+        self.workingMemory.Reset()
 
     def Compute( self, columnSDR, lastVector ):
     # Compute the action of vector memory, and learn on the synapses.
-
-        if lastVector[ 2 ] != 0:
-            self.FToFSegmentStruct.ResetWorkingMemory()
 
         self.columnSDR = columnSDR.sparse.tolist()
 
@@ -205,10 +215,14 @@ class VectorMemory:
             exit()
 
         # Update working memory.
-        self.FToFSegmentStruct.UpdateWorkingMemory( lastVector )
+#        self.FToFSegmentStruct.UpdateWorkingMemory( lastVector )
+        self.workingMemory.UpdateVectorAndReceiveColumns( lastVector, self.columnSDR )
 
         # Clear old active cells and get new ones active cells for this time step.
         self.ActivateFCells()
+
+        # Update entries of working memory with active cells.
+        self.workingMemory.UpdateEntries( self.columnSDR, self.winnerFCells )
 
         # If any winner cell was not predicted then create a new segment to the lastActive FCells.
         for winCell in self.winnerFCells:

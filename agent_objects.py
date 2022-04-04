@@ -70,7 +70,6 @@ class AgentOrange:
             vectorDimensions          = vpsVectorDim,
             initialVectorScaleFactor  = 0.05,
             initVectorConfidence      = 0.3,
-            maxNonFeeling             = 0.5
         )
 
         self.lastVector = []
@@ -200,6 +199,13 @@ class AgentOrange:
         self.lastVector = self.newVector.copy()
 
         # Compute cell activation and generate next predicted cells.
+        if self.lastVector[ 2 ] == 0:
+            feelingState = 0.0
+        else:
+            feelingState = 1.0
+        if feelingState > 0.0:
+            self.vp.ResetWorkingMemory()
+
         vpDesiredNewVector = self.vp.Compute( senseSDR, self.lastVector )
 
         # Generate random motion of the sense organ.

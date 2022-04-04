@@ -2,19 +2,27 @@ from useful_functions import BinarySearch, NoRepeatInsort, CheckInside, Generate
 
 class WorkingMemory:
 
-    def __init__( self, FCellsPerColumn, FColumnDimensions, vectorDimensions, numVectorSynapses ):
+    def __init__( self, overlapThreshold, initialPosVariance, FCellsPerColumn, maxTimeSinceActive, sameThreshold,
+        samePercent, vectorDimensions ):
     # Setup working memory.
 
+        self.entryColumnSDR  = []                   # The column input for each entry.
+        self.entryCellSDR    = []                   # The last 3 cell inputs for each entry.
+        self.unityCellSDR    = []                   # The most seen cell entry for last three. If tie choose least winner.
+        self.entryPos        = []                   # The current relative position for each entry.
+        self.entryTime       = []                   # The time since active for entry.
+
+        self.thisEntryIndex   = None                  # The zero vector location entry index.
+        self.columnSDRFits    = False               # True if the zero vector entry fits the column input.
+        self.reachedStability = False               # True if all entries history fits above sameThreshold.
+
+        self.overlapThreshold   = overlapThreshold
+        self.checkRange         = initialPosVariance
+        self.sameThreshold      = sameThreshold
+        self.samePercent        = samePercent
         self.FCellsPerColumn    = FCellsPerColumn
-        self.FColumnDimensions  = FColumnDimensions
+        self.maxTimeSinceActive = maxTimeSinceActive
         self.vectorDimensions   = vectorDimensions
-        self.numVectorSynapses  = numVectorSynapses
-
-        self.positionCellScores = [ [] for c in range( FColumnDimensions ) ]
-
-        self.currentPosition    = []
-        for d in range( vectorDimensions ):
-            self.currentPosition.append( 0 )
 
     def __repr__( self ):
     # Returns properties of this class as a string.
@@ -31,44 +39,128 @@ class WorkingMemory:
 
         return stringReturn
 
-    def UpdatePositionCellScores( self, newPositionCellScores ):
-    # Given this time steps position-cell score data, update self.positionCellScores.
+    def Reset( self ):
+    # Refresh all entries of working memory.
 
-        for cell in newPositionCellScores:
-            columnEntry = self.positionCellScores[ int( cell[ 0 ] / self.FCellsPerColumn ) ]
+        self.entryColumnSDR  = []
+        self.entryCellSDR    = []
+        self.unityCellSDR    = []
+        self.entryPos        = []
+        self.entryTime       = []
 
-            # Using the pre-existing cell entries for this column update the average score; or create a new entry.
-            cellIndex = 0
-            while cellIndex < len( columnEntry ):
-                if columnEntry[ cellIndex ][ 0 ] == cell[ 0 ]:
-                    break
-                else:
-                    cellIndex += 1
+        self.thisEntryIndex   = None
+        self.columnSDRFits    = False
+        self.reachedStability = False    
 
-            if cellIndex == len( columnEntry ):
-                # Calculate weighted average.
-                newScores = [ [] for i in range( self.vectorDimensions ) ]
-                for d in range( self.vectorDimensions ):
-                    for x in range( self.numVectorSynapses ):
-                         newScores[ d ].append( cell[ 2 ][ d ][ x ] / cell[ 1 ] )
-
-                columnEntry.append( [ cell[ 0 ], cell[ 1 ], newScores ] )        # [ Terminal Cell, Count, Position Scores ]
-            else:
-                newScores = [ [] for i in range( self.vectorDimensions ) ]
-                for d in range( self.vectorDimensions ):
-                    for x in range( self.numVectorSynapses ):
-                         newScores[ d ].append( ( ( columnEntry[ cellIndex ][ 1 ] * columnEntry[ cellIndex ][ 2 ][ d ][ x ] ) + cell[ 2 ][ d ][ x ] ) / ( columnEntry[ cellIndex ][ 1 ] + cell[ 1 ] ) )
-
-                columnEntry[ cellIndex ][ 1 ] += cell[ 1 ]
-                columnEntry[ cellIndex ][ 2 ] = newScores
-
-    def UpdateVector( self, vector ):
-    # Use the vector to update the local workingMemory position.
-
-        if len( vector ) != self.vectorDimensions:
-            print( "Vectors sent to working memory of wrong size." )
-            exit()
+    def UpdateVectorAndReceiveColumns( self, vector, columnSDR ):
+    # Use the vector to update all vectors stored in workingMemory items, and add timeStep.
+    # Then, given the columnSDR, check overlap at zero-location. If above threshold make note of index.
+    # Also check if reached stability, if it has then calculate unityCellSDR.
 
         # Update vector.
-        for d in range( self.vectorDimensions ):
-            self.currentPosition[ d ] += vector[ d ]
+        if len( self.entryCellSDR ) > 0:
+            if len( vector ) != len( self.entryPos[ 0 ] ):
+                print( "Vectors sent to working memory of wrong size." )
+                exit()
+
+            for index in range( len( self.entryCellSDR ) ):
+                for x in range( len( self.entryPos[ index ] ) ):
+                    self.entryPos[ index ][ x ] += vector[ x ]
+
+        # Check columnSDR
+        self.thisEntryIndex = None
+        for entryIdx, entry in enumerate( self.entryColumnSDR ):
+            if CheckInside( [ 0 for i in range( self.vectorDimensions ) ], self.entryPos[ entryIdx ], self.checkRange ):
+                self.thisEntryIndex = entryIdx
+
+                if len( FastIntersect( columnSDR, entry ) ) >= self.overlapThreshold:
+                    self.columnSDRFits = True
+                else:
+                    self.columnSDRFits = False
+
+        # If zero entry doesn't exist then create a new one.
+        if self.thisEntryIndex == None:
+            self.thisEntryIndex = len( self.entryColumnSDR )
+            self.entryColumnSDR.append( columnSDR )
+            self.entryCellSDR.append( [] )
+            self.entryPos.append( [ 0 for i in range( self.vectorDimensions ) ] )
+            self.entryTime.append( 0 )
+            self.unityCellSDR.append( [] )
+
+        # If the entry doesn't fit then clear the zero-vector cell-SDRs and modify the columnSDR.
+        if not self.columnSDRFits:
+            self.entryCellSDR[ self.thisEntryIndex ]   = []
+            self.entryColumnSDR[ self.thisEntryIndex ] = columnSDR
+
+        # Check if reached stability.
+        self.reachedStability = True
+        if not self.columnSDRFits:
+            self.reachedStability = False
+        else:
+            numStable = 0
+            for entry in self.entryCellSDR:
+                if len( entry ) >= self.sameThreshold:
+                    numStable += 1
+            if numStable / len( self.entryColumnSDR ) < self.samePercent:
+                self.reachedStability = False
+
+        # Update unityCellSDR.
+        self.unityCellSDR = []
+        for entry in self.entryCellSDR:
+            if len( entry ) > 0:
+                self.unityCellSDR.append( GenerateUnitySDR( entry, len( columnSDR ), self.FCellsPerColumn ) )
+            else:
+                self.unityCellSDR.append( [] )
+
+    def UpdateEntries( self, columnSDR, winnerCells ):
+    # If any item in working memory is above threshold time steps then remove it.
+    # Add the new active Fcells to working memory at the 0-vector location, append it on the end, if columnSDRFits.
+
+        entryToDelete = []
+
+        # Insert winner cells into entry SDR.
+        if self.thisEntryIndex != None:
+            self.entryCellSDR[ self.thisEntryIndex ].append( winnerCells )
+
+            if self.columnSDRFits:
+                self.entryTime[ self.thisEntryIndex ] = -1
+            for entryIdx in range( len( self.entryCellSDR ) ):
+                # Update time step.
+                self.entryTime[ entryIdx ] += 1
+
+                if self.entryTime[ entryIdx ] > self.maxTimeSinceActive:
+                    NoRepeatInsort( entryToDelete, entryIdx )
+
+        # For any entry with entryCellSDR greater than threshold delete the oldest ones.
+        for entry in self.entryCellSDR:
+            while len( entry ) > self.sameThreshold:
+                del entry[ 0 ]
+
+        # Delete items whose timeStep is above threshold.
+        if len( entryToDelete ) > 0:
+            for toDel in reversed( entryToDelete ):
+                del self.entryColumnSDR[ toDel ]
+                del self.entryCellSDR[ toDel ]
+                del self.unityCellSDR[ toDel ]
+                del self.entryPos[ toDel ]
+                del self.entryTime[ toDel ]
+
+    def GetCellForColumn( self, col ):
+    # For the predicted entry and given column return the cell working memory predicted, if it does.
+    # If it didn't predict this column return None.
+
+        for cell in range( col * self.FCellsPerColumn, ( col * self.FCellsPerColumn ) + self.FCellsPerColumn ):
+            if self.thisEntryIndex != None:
+                if BinarySearch( self.unityCellSDR[ self.thisEntryIndex ], cell ):
+                    return cell
+        return None
+
+    def ReturnSegmentsAsList( self ):
+    # Return the unityCellSDR cells as a list of lists.
+
+        toReturn = []
+
+        for entry in self.unityCellSDR:
+            toReturn.append( entry )
+
+        return toReturn

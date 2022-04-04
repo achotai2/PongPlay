@@ -78,12 +78,8 @@ class Agent:
             maxSynapsesPerSegment     = 50,
             equalityThreshold         = 35,
             vectorDimensions          = vpsVectorDim,
-            numVectorSynapses         = 500,
-            vectorRange               = 1600,
-            vectorScaleFactor         = 0.9,
-            WMEntryDecay              = 25,
-            WMStabilityThreshold      = 25,
-            WMvectorScaleFactor       = 0.8
+            initialVectorScaleFactor  = 0.05,
+            initVectorConfidence      = 0.3,
         )
 
         self.lastVector = []
