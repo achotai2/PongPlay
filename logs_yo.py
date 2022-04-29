@@ -25,13 +25,18 @@ class AgentLog:
         self.graphY3NumPredicCells = []
         self.graphXTimeSteps       = []
 
-    def WriteToLogFile( self, new_data, timeStep ):
+    def WriteToLogFile( self, new_data, timeStep, reflecting ):
     # Write sent list of data to file.
 
         # Create text file to store log data.
         log_data = []
         log_data.append( "-------------------------------------------------------" )
         log_data.append( "Time Step: " + str( timeStep ) )
+
+        if reflecting:
+            log_data.append( "Reflecting..." )
+        else:
+            log_data.append( "Computing..." )
 
         for entry in new_data:
             log_data.append( str( entry ) )
@@ -43,13 +48,19 @@ class AgentLog:
             log_file.write( "\n" )
         log_file.close()
 
-    def FeedForGraphs( self, numActiveCells, numActiveSegs, numPredictedCells, timeStep ):
+    def FeedForGraphs( self, numActiveCells, numActiveSegs, numPredictedCells, timeStep, reflecting ):
     # Feed data for graphs.
 
-        self.graphY1NumActiveCells.append( numActiveCells )
-        self.graphY2NumSegs.append( numActiveSegs )
-        self.graphY3NumPredicCells.append( numPredictedCells )
-        self.graphXTimeSteps.append( timeStep )
+        if not reflecting:
+            self.graphY1NumActiveCells.append( numActiveCells )
+            self.graphY2NumSegs.append( numActiveSegs )
+            self.graphY3NumPredicCells.append( numPredictedCells )
+            self.graphXTimeSteps.append( timeStep )
+        else:
+            self.graphY1NumActiveCells.append( 0 )
+            self.graphY2NumSegs.append( 0 )
+            self.graphY3NumPredicCells.append( 0 )
+            self.graphXTimeSteps.append( timeStep )
 
     def EndLog( self, endTime ):
     # Enter the end time stamp for log.
@@ -179,9 +190,9 @@ class Logging:
     # Go through all returned segment data and write it to separate segment files.
 
         for aIdx, Agent in enumerate( AgentList ):
-            new_data = Agent.GetLogData()
+            new_data, reflecting = Agent.GetLogData()
 
-            self.agentsLogs[ aIdx ].WriteToLogFile( new_data, self.timeStep )
+            self.agentsLogs[ aIdx ].WriteToLogFile( new_data, self.timeStep, reflecting )
 
     def AccumulateReportData( self, AgentList, currState ):
     # Adds currState to stateData, which stores all states and the number of times that state has occurred.
@@ -210,8 +221,11 @@ class Logging:
             Agent.SendStateData( stateIndex )
 
             # Data for graph.
-            numActiveCells, numActiveSegs, numPredictedCells = Agent.GetGraphData()
-            self.agentsLogs[ aIdx ].FeedForGraphs( numActiveCells, numActiveSegs, numPredictedCells, self.timeStep )
+            cellData, reflecting = Agent.GetGraphData()
+            numActiveCells    = cellData[ 0 ]
+            numActiveSegs     = cellData[ 1 ]
+            numPredictedCells = cellData[ 2 ]
+            self.agentsLogs[ aIdx ].FeedForGraphs( numActiveCells, numActiveSegs, numPredictedCells, self.timeStep, reflecting )
 
     def WhenExit( self, AgentList ):
     # Finalize log files and prepare graphs.

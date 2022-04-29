@@ -1,5 +1,6 @@
 from bisect import bisect_left
-from random import randrange
+from random import randrange, shuffle
+from math import sqrt, exp
 
 def Within ( value, minimum, maximum, equality ):
 # Checks if value is <= maximum and >= minimum.
@@ -104,7 +105,7 @@ def ModThisSynapse( currentValue, howMuch, maxValue, minValue, notIfMax ):
 
     newValue = currentValue
 
-    if ( notIfMax and newValue == 1.0 ) or ( newValue == 0.0 and howMuch < 0.0 ):
+    if ( notIfMax and newValue >= maxValue ) or ( newValue <= newValue and howMuch < 0.0 ):
         return newValue
 
     newValue += howMuch
@@ -115,6 +116,42 @@ def ModThisSynapse( currentValue, howMuch, maxValue, minValue, notIfMax ):
         newValue = 0.0
 
     return newValue
+
+def ReturnMaxIndices( countsList, numToReturn, sortThisList ):
+# For the countsList sort the entries by count. Return a list of indices in the original list for maximum count.
+# If there are entries with tie counts then choose one at random.
+# The returned list is sorted if sortThisList is True.
+
+    if numToReturn > len( countsList ):
+        print( "ReturnMaxIndices() requested to return a list longer than countsList" )
+        exit()
+
+    # Assemble counts list with indices.
+    indicesList = []
+    for i in range( len( countsList ) ):
+        indicesList.append( ( i, countsList[ i ] ) )
+
+    # Shuffle the list.
+    shuffle( indicesList )
+
+    # Assemble maximum counts list.
+    maxCountIndicesList = []
+    while len( maxCountIndicesList ) < numToReturn:
+        # Find the max count.
+        maxCount = 0
+        maxIndex = 0
+        for index, item in enumerate( indicesList ):
+            if item[ 1 ] > maxCount:
+                maxCount = item[ 1 ]
+                maxIndex = index
+
+        maxCountIndicesList.append( indicesList[ maxIndex ][ 0 ] )
+        del indicesList[ maxIndex ]
+
+    if sortThisList:
+        return sorted( maxCountIndicesList )
+    else:
+        return maxCountIndicesList
 
 def GenerateUnitySDR( SDRList, maxReturnSDRSize, cellsPerColumn ):
 # Given a list of SDRs generate a new list of requested size by choosing the most frequent cells, and random otherwise.
@@ -162,4 +199,27 @@ def GenerateUnitySDR( SDRList, maxReturnSDRSize, cellsPerColumn ):
                 if i == 0 or int( returnSDR[ i - 1 ] / cellsPerColumn ) != int( chosenCell / cellsPerColumn ):
                     returnSDR.insert( i, chosenCell )
 
+        else:
+            break
+
     return returnSDR
+
+def CalculateDistanceScore( vector, vectorDimensions, vectorCenter, standardDeviation, vectorConfidence ):
+# Using the received variables calculate the distance score as an x^2 distribution.
+
+    if len( vector ) != vectorDimensions or len( vectorCenter ) != vectorDimensions or len( standardDeviation ) != vectorDimensions or len( vectorConfidence ) != vectorDimensions:
+        print( "Vector sent to CalculateDistanceScore() not of same dimensions as vectorCenter." )
+        exit()
+
+    # Calculate the distance score from this vector to our self.vectorCenter for each dimension.
+    distanceScore = []
+    for d in range( vectorDimensions ):
+        exponential = -0.5 * ( ( ( vectorCenter[ d ] - vector[ d ] ) / standardDeviation[ d ] ) ** 2 )
+        factor      = 0.39894228 * vectorConfidence[ d ] / standardDeviation[ d ]
+        distanceScore.append( factor * exp( exponential ) )
+
+    sum = 0
+    for i in range( vectorDimensions ):
+        sum += distanceScore[ d ] ** 2
+
+    return sqrt( sum )

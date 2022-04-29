@@ -20,6 +20,9 @@ wn.bgcolor( "black" )
 wn.setup( width = screenWidth, height = screenHeight )
 wn.tracer( 0 )
 
+colourTimeStep          = 0
+agentReflective         = False
+
 boxColour  = 1
 objWidth   = 100
 objHeight  = 100
@@ -67,18 +70,30 @@ while True:
 
     logFile.AddToTimeStep()
 
-    if int( logFile.timeStep / 100 ) % 3 == 1:
-        boxColour = 2
-        box.color( "green" )
-    elif int( logFile.timeStep / 100 ) % 3 == 2:
-        boxColour = 3
-        box.color( "blue" )
-    elif int( logFile.timeStep / 100 ) % 3 == 0:
-        boxColour = 1
-        box.color( "red" )
+    organVector = [ 0, 0 ]
 
-    # Run agent brain and get motor vector.
-    organVector = Agent1.Brain( objCenterX, objCenterY, objWidth, objHeight, boxColour, sensePosX, sensePosY, inputNoisePct )
+    if not agentReflective:
+        colourTimeStep += 1
+
+        if colourTimeStep >= 100:
+            if boxColour == 1:
+                boxColour = 2
+                box.color( "green" )
+                colourTimeStep = 0
+            elif boxColour == 2:
+                boxColour = 3
+                box.color( "blue" )
+                colourTimeStep = 0
+            elif boxColour == 3:
+                boxColour = 1
+                box.color( "red" )
+                colourTimeStep  = 0
+                agentReflective = True
+
+        # Run agent brain and get motor vector.
+        organVector = Agent1.Brain( objCenterX, objCenterY, objWidth, objHeight, boxColour, sensePosX, sensePosY, inputNoisePct )
+    else:
+        agentReflective = Agent1.Reflect()
 
     # Accumulate the active cells and segments and input into report data.
     logFile.AccumulateReportData( [ Agent1 ], [ sensePosX, sensePosY, boxColour ] )
