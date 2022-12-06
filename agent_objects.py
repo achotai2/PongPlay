@@ -46,7 +46,7 @@ class AgentOrange:
             synPermInactiveDec         = 0.005,
             synPermActiveInc           = 0.04,
             synPermConnected           = 0.1,
-            boostStrength              = 1.0,
+            boostStrength              = 0.0,
             seed                       = -1,
             wrapAround                 = False
         )
@@ -84,6 +84,7 @@ class AgentOrange:
             "numVectorSynapses"         : 100,
             "vectorSynapseScaleFactor"  : 0.8,
             "maxVectorSynapseRadius"    : 15,
+            "permanenceLowerThreshold"  : 0.1,                  # The lower threshold for synapses.
         }
 
         self.vp = VectorMemory( vectorMemoryDict )
