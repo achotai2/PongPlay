@@ -21,7 +21,6 @@ wn.setup( width = screenWidth, height = screenHeight )
 wn.tracer( 0 )
 
 colourTimeStep          = 0
-agentReflective         = False
 
 boxColour  = 1
 objWidth   = 100
@@ -51,7 +50,7 @@ senseOrgan.penup()
 senseOrgan.goto( sensePosX, sensePosY )
 
 # Create agent------------------------------------------------------------------
-Agent1 = AgentOrange( "Objects", senseResX, senseResY, 2, 1 )
+Agent1 = AgentOrange( "Objects", senseResX, senseResY, 2, 0 )
 
 # Prepare log and report files--------------------------------------------------
 logFile = Logging( [ Agent1.ID ] )
@@ -72,28 +71,23 @@ while True:
 
     organVector = [ 0, 0 ]
 
-    if not agentReflective:
-        colourTimeStep += 1
+    colourTimeStep += 1
+    if colourTimeStep >= 100:
+        if boxColour == 1:
+            boxColour = 2
+            box.color( "green" )
+            colourTimeStep = 0
+        elif boxColour == 2:
+            boxColour = 3
+            box.color( "blue" )
+            colourTimeStep = 0
+        elif boxColour == 3:
+            boxColour = 1
+            box.color( "red" )
+            colourTimeStep  = 0
 
-        if colourTimeStep >= 100:
-            if boxColour == 1:
-                boxColour = 2
-                box.color( "green" )
-                colourTimeStep = 0
-            elif boxColour == 2:
-                boxColour = 3
-                box.color( "blue" )
-                colourTimeStep = 0
-            elif boxColour == 3:
-                boxColour = 1
-                box.color( "red" )
-                colourTimeStep  = 0
-                agentReflective = True
-
-        # Run agent brain and get motor vector.
-        organVector = Agent1.Brain( objCenterX, objCenterY, objWidth, objHeight, boxColour, sensePosX, sensePosY, inputNoisePct )
-    else:
-        agentReflective = Agent1.Reflect()
+    # Run agent brain and get motor vector.
+    organVector = Agent1.Brain( objCenterX, objCenterY, objWidth, objHeight, boxColour, sensePosX, sensePosY, inputNoisePct )
 
     # Accumulate the active cells and segments and input into report data.
     logFile.AccumulateReportData( [ Agent1 ], [ sensePosX, sensePosY, boxColour ] )

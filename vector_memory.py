@@ -30,17 +30,17 @@ class VectorMemory:
          # Stores and deals with all FCell to FCell segments.
         self.FToFSegmentStruct = SegmentStructure( vectorMemoryDict )
 
-        self.workingMemory = WorkingMemory( vectorMemoryDict )
+#        self.workingMemory = WorkingMemory( vectorMemoryDict )
 
         # Create cells in object layer.
-        self.OCells = []
-        for o in range( vectorMemoryDict[ "numObjectCells" ] ):
-            self.OCells.append( OCell() )
-        self.activeOCells = []
-        self.OCellFeeling = []
+#        self.OCells = []
+#        for o in range( vectorMemoryDict[ "numObjectCells" ] ):
+#            self.OCells.append( OCell() )
+#        self.activeOCells = []
+#        self.OCellFeeling = []
 
-        self.stateReflectTime = 0
-        self.lastOCellSDR = None
+#        self.stateReflectTime = 0
+#        self.lastOCellSDR = None
 
         self.stateOCellData = []            # Stores the data for the active O-Cells Report.
 
@@ -75,7 +75,7 @@ class VectorMemory:
         log_data.append( "Active F-Cells: " + str( len( self.activeFCells ) ) + ", " + str( self.activeFCells ) )
         log_data.append( "Winner F-Cells: " + str( self.winnerFCells ) )
 
-        log_data.append( "Active O-Cells: " + str( len( self.activeOCells ) ) + ", " + str( self.activeOCells ) )
+#        log_data.append( "Active O-Cells: " + str( len( self.activeOCells ) ) + ", " + str( self.activeOCells ) )
 
         log_data.append( "Bursting Column Pct: " + str( len( self.burstingCols ) / self.vectorMemoryDict[ "columnDimensions" ] * 100 ) + "%" )
         log_data.append( "Bursting Columns: " + str( self.burstingCols ) )
@@ -83,16 +83,17 @@ class VectorMemory:
 
         log_data.append( "Predicted Cells: " + str( len( self.predictedFCells ) ) + ", " + str( self.predictedFCells ) )
 
-        log_data.append( "Working Memory Entries: " + str( self.workingMemory ) )
-        log_data.append( "Working Memory Stable: " + str( self.workingMemory.reachedStability ) )
+#        log_data.append( "Working Memory Entries: " + str( self.workingMemory ) )
+#        log_data.append( "Working Memory Stable: " + str( self.workingMemory.reachedStability ) )
 
         log_data.append( "# of FToF-Segments: " + str( len( self.FToFSegmentStruct.segments ) ) + ", # of Active Segments: " + str( len( self.FToFSegmentStruct.activeSegments ) ) +
-            ", # of Stimulate Segments: " + str( len( self.FToFSegmentStruct.stimulatedSegments ) ) )
+            ", # of Stimulated Segments: " + str( len( self.FToFSegmentStruct.stimulatedSegments ) ) )
 
     def ActivateFCells( self ):
     # Uses activated columns and cells in predicted state to put cells in active states.
     # Return a list of winnerCells.
 
+        # Move active cells to last active, and lastactive to not active.
         self.UpdateFCellActivity()
 
         self.burstingCols    = []
@@ -103,27 +104,31 @@ class VectorMemory:
             activeThisColumn = []
             winnerThisColumn = -1
 
-            # Get working memories suggestion for this column.
-            wmCell = self.workingMemory.GetCellForColumn( col )
+#            # Get working memories suggestion for this column.
+#            wmCell = self.workingMemory.GetCellForColumn( col )
 
             # Check if any cells in column are predicted. If yes then make a note of them.
             for cell in range( col * self.vectorMemoryDict[ "cellsPerColumn" ], ( col * self.vectorMemoryDict[ "cellsPerColumn" ] ) + self.vectorMemoryDict[ "cellsPerColumn" ] ):
                 if self.FCells[ cell ].predicted:
                     predictedCellsThisCol.append( cell )
 
-            # If result was predicted by FCells or working memory...
+            # If result was predicted by FCells...
 #            if len( predictedCellsThisCol ) > 0 or ( self.workingMemory.reachedStability and wmCell != None ):
             if len( predictedCellsThisCol ) > 0:
-                self.notBurstingCols.append( col )
+              self.notBurstingCols.append( col )
 
-                # If working memory is stable then it selects the winner.
-                if self.workingMemory.reachedStability and wmCell != None:
-                    activeThisColumn.append( wmCell )
-                    winnerThisColumn = wmCell
-                # Otherwise select from predictedCellsThisCol the cell with most activation.
-                else:
-                    activeThisColumn.append( self.FToFSegmentStruct.ThereCanBeOnlyOne( predictedCellsThisCol )[ 0 ] )
-                    winnerThisColumn = activeThisColumn[ -1 ]
+#                # If working memory is stable then it selects the winner.
+#                if self.workingMemory.reachedStability and wmCell != None:
+#                    activeThisColumn.append( wmCell )
+#                    winnerThisColumn = wmCell
+#                # Otherwise select from predictedCellsThisCol the cell with most activation.
+#                else:
+
+                # Make all predicted cells active.
+                activeThisColumn = predictedCellsThisCol.copy()
+
+                # Choose the winner cell.
+                winnerThisColumn = self.FToFSegmentStruct.ThereCanBeOnlyOne( predictedCellsThisCol, col )
 
             # If result wasn't predicted by FCells...
             else:
@@ -155,43 +160,43 @@ class VectorMemory:
                 print( "No cells chosen winner this column.")
                 exit()
 
-    def ActivateOCells( self ):
-    # Use the FToFSegmentStruct stimulated and active segments to determine the active OCells.
+#    def ActivateOCells( self ):
+#    # Use the FToFSegmentStruct stimulated and active segments to determine the active OCells.
+#
+#        # Refresh old active OCells.
+#        for actOCell in self.activeOCells:
+#            self.OCells[ actOCell ].active = False
+#        self.activeOCells = []
+#
+#        # Gather the stimulation level for all OCells from the stimulated FToFSegmentStruct segments.
+#        stimulatedOCellCounts = self.FToFSegmentStruct.GetStimulatedOCells( self.vectorMemoryDict[ "numObjectCells" ] )
+#
+#        # Get the OCells with the highest counts and make these active.
+#        stimulatedOCells = ReturnMaxIndices( stimulatedOCellCounts, self.vectorMemoryDict[ "objectRepActivation" ], True )
+#        for oCell in stimulatedOCells:
+#            if stimulatedOCellCounts[ oCell ] >= self.vectorMemoryDict[ "OCellActivationThreshold" ]:
+#                self.activeOCells.append( oCell )
+#
+#        for actOCell in self.activeOCells:
+#            self.OCells[ actOCell ].active = True
 
-        # Refresh old active OCells.
-        for actOCell in self.activeOCells:
-            self.OCells[ actOCell ].active = False
-        self.activeOCells = []
-
-        # Gather the stimulation level for all OCells from the stimulated FToFSegmentStruct segments.
-        stimulatedOCellCounts = self.FToFSegmentStruct.GetStimulatedOCells( self.vectorMemoryDict[ "numObjectCells" ] )
-
-        # Get the OCells with the highest counts and make these active.
-        stimulatedOCells = ReturnMaxIndices( stimulatedOCellCounts, self.vectorMemoryDict[ "objectRepActivation" ], True )
-        for oCell in stimulatedOCells:
-            if stimulatedOCellCounts[ oCell ] >= self.vectorMemoryDict[ "OCellActivationThreshold" ]:
-                self.activeOCells.append( oCell )
-
-        for actOCell in self.activeOCells:
-            self.OCells[ actOCell ].active = True
-
-    def CheckOCellFeeling( self ):
-    # Check the active OCell rep against stored OCell feeling states. If one exists then return this feeling.
-
-        maxOverlap = 0
-        maxFeeling = 0.0
-
-        for entry in self.OCellFeeling:
-            overlap = len( FastIntersect( self.activeOCells, entry[ 0 ] ) )
-            if overlap >= self.vectorMemoryDict[ "objectRepActivation" ] and overlap > maxOverlap:
-                maxFeeling = entry[ 1 ]
-
-        if maxFeeling > 0.0:
-            print( "POSITIVE Feeling" )
-        elif maxFeeling < 0.0:
-            print( "NEGATIVE Feeling" )
-
-        return maxFeeling
+#    def CheckOCellFeeling( self ):
+#    # Check the active OCell rep against stored OCell feeling states. If one exists then return this feeling.
+#
+#        maxOverlap = 0
+#        maxFeeling = 0.0
+#
+#        for entry in self.OCellFeeling:
+#            overlap = len( FastIntersect( self.activeOCells, entry[ 0 ] ) )
+#            if overlap >= self.vectorMemoryDict[ "objectRepActivation" ] and overlap > maxOverlap:
+#                maxFeeling = entry[ 1 ]
+#
+#        if maxFeeling > 0.0:
+#            print( "POSITIVE Feeling" )
+#        elif maxFeeling < 0.0:
+#            print( "NEGATIVE Feeling" )
+#
+#        return maxFeeling
 
     def PredictFCells( self, vector ):
     # Clear old predicted FCells and generate new predicted FCells.
@@ -201,17 +206,17 @@ class VectorMemory:
             cell.predicted = False
 
         # Get the predicted FCells and make them predicted state.
-        self.predictedFCells = self.FToFSegmentStruct.StimulateSegments( self.activeOCells, self.columnSDR, vector )
+        self.predictedFCells = self.FToFSegmentStruct.StimulateSegments( self.activeFCells, vector )
 
         # Make the selected cells predicted state.
         for predCell in self.predictedFCells:
             self.FCells[ predCell ].predicted = True
 
-    def Memorize( self, feeling ):
-    # Save the present state in working memory for unique learning later, during reflection.
-    # Then clear working memory entries and FToFSegmentStruct stimulated segments.
-
-        self.workingMemory.SaveState( feeling )
+#    def Memorize( self, feeling ):
+#    # Save the present state in working memory for unique learning later, during reflection.
+#    # Then clear working memory entries and FToFSegmentStruct stimulated segments.
+#
+#        self.workingMemory.SaveState( feeling )
 
     def UpdateFCellActivity( self ):
     # Updates the FCell states for a next time step.
@@ -233,64 +238,64 @@ class VectorMemory:
             self.FCells[ winCell ].lastWinner = True
         self.winnerFCells = []
 
-    def Refresh( self ):
-    # Clear the entries of working memory, all stimulated segmnets, and all predicted and active FCells, and all active OCells.
-
-        for pCell in self.predictedFCells:
-            self.FCells[ pCell ].predicted = False
-        self.predictedFCells = []
-
-        for aCell in self.activeFCells:
-            self.FCells[ aCell ].active = False
-        self.activeFCells = []
-
-        for lCell in self.lastActiveFCells:
-            self.FCells[ lCell ].lastActive = False
-        self.lastActiveFCells = []
-
-        for lwCell in self.lastWinnerFCells:
-            self.FCells[ lwCell ].lastWinner = False
-        self.lastWinnerFCells = []
-
-        for wCell in self.winnerFCells:
-            self.FCells[ wCell ].winner = False
-        self.winnerFCells = []
-
-        for oCell in self.activeOCells:
-            self.OCells[ oCell ].active = False
-        self.activeOCells = []
-
+#    def Refresh( self ):
+#    # Clear the entries of working memory, all stimulated segmnets, and all predicted and active FCells, and all active OCells.
+#
+#        for pCell in self.predictedFCells:
+#            self.FCells[ pCell ].predicted = False
+#        self.predictedFCells = []
+#
+#        for aCell in self.activeFCells:
+#            self.FCells[ aCell ].active = False
+#        self.activeFCells = []
+#
+#        for lCell in self.lastActiveFCells:
+#            self.FCells[ lCell ].lastActive = False
+#        self.lastActiveFCells = []
+#
+#        for lwCell in self.lastWinnerFCells:
+#            self.FCells[ lwCell ].lastWinner = False
+#        self.lastWinnerFCells = []
+#
+#        for wCell in self.winnerFCells:
+#            self.FCells[ wCell ].winner = False
+#        self.winnerFCells = []
+#
+#        for oCell in self.activeOCells:
+#            self.OCells[ oCell ].active = False
+#        self.activeOCells = []
+#
+#        self.workingMemory.Reset()
+#
+#        self.FToFSegmentStruct.ResetStimulatedSegments()
 #        self.workingMemory.Reset()
 
-        self.FToFSegmentStruct.ResetStimulatedSegments()
-        self.workingMemory.Reset()
+#    def DeleteSavedState( self ):
+#    # Order workingMemory to delete its Zeroth saved state. Check if working memory has any more states left and return this.
+#
+#        self.workingMemory.DeleteSavedStateEntry()
+#
+#        return self.workingMemory.StillReflecting()
 
-    def DeleteSavedState( self ):
-    # Order workingMemory to delete its Zeroth saved state. Check if working memory has any more states left and return this.
+#    def ChooseNextReflectionEntry( self ):
+#    # Randomly choose and return the next workingMemory entry index.
+#
+#        return self.workingMemory.ReturnRandomEntryIndex()
 
-        self.workingMemory.DeleteSavedStateEntry()
-
-        return self.workingMemory.StillReflecting()
-
-    def ChooseNextReflectionEntry( self ):
-    # Randomly choose and return the next workingMemory entry index.
-
-        return self.workingMemory.ReturnRandomEntryIndex()
-
-    def GenerateUniqueCellReps( self, stateFeeling ):
-    # Tell workingMemory to generate random cells for each columnSDR stored.
-    # Also generate a random OCell activation rep.
-
-        self.activeOCells = []
-
-        # Check if there is an OCell rep stored for this feelingState.
-        for entry in self.OCellFeeling:
-            if entry[ 1 ] == stateFeeling:
-                self.activeOCells = entry[ 0 ]
-        if len( self.activeOCells ) == 0:
-            self.activeOCells = sorted( sample( range( self.vectorMemoryDict[ "numObjectCells" ] ), self.vectorMemoryDict[ "objectRepActivation" ] ) )
-            # Save the new OCell rep with feeling.
-            self.OCellFeeling.append( [ self.activeOCells.copy(), stateFeeling ] )
+#    def GenerateUniqueCellReps( self, stateFeeling ):
+#    # Tell workingMemory to generate random cells for each columnSDR stored.
+#    # Also generate a random OCell activation rep.
+#
+#        self.activeOCells = []
+#
+#        # Check if there is an OCell rep stored for this feelingState.
+#        for entry in self.OCellFeeling:
+#            if entry[ 1 ] == stateFeeling:
+#                self.activeOCells = entry[ 0 ]
+#        if len( self.activeOCells ) == 0:
+#            self.activeOCells = sorted( sample( range( self.vectorMemoryDict[ "numObjectCells" ] ), self.vectorMemoryDict[ "objectRepActivation" ] ) )
+#            # Save the new OCell rep with feeling.
+#            self.OCellFeeling.append( [ self.activeOCells.copy(), stateFeeling ] )
 
 #        # Generate unique FCell reps for each stored column, randomly if they don't exist stored.
 #        savedActiveOCells = self.workingMemory.GenerateCells( self.lastOCellSDR )
@@ -303,45 +308,45 @@ class VectorMemory:
 #            self.activeOCells = savedActiveOCells
 #            self.lastOCellSDR = savedActiveOCells
 
-        for oCell in self.activeOCells:
-            self.OCells[ oCell ].active = True
+#        for oCell in self.activeOCells:
+#            self.OCells[ oCell ].active = True
 
-    def VectorMemoryReflect( self, lastWMEntryID, thisWMEntryID, nextWMEntryID ):
-    # Go through a reflective period to learn important stored states with a unique OCell represention and more specific vector and SDR thresholds.
-
-        print( "Vector Memory Reflecting..." )
-
-        # Calculate the vectors given last and this WMEntryIDs.
-        lastVector = self.workingMemory.CalculateVector( lastWMEntryID, thisWMEntryID )
-        nextVector = self.workingMemory.CalculateVector( thisWMEntryID, nextWMEntryID )
-
-        # Update FCell activity.
+#    def VectorMemoryReflect( self, lastWMEntryID, thisWMEntryID, nextWMEntryID ):
+#    # Go through a reflective period to learn important stored states with a unique OCell represention and more specific vector and SDR thresholds.
+#
+#        print( "Vector Memory Reflecting..." )
+#
+#        # Calculate the vectors given last and this WMEntryIDs.
+#        lastVector = self.workingMemory.CalculateVector( lastWMEntryID, thisWMEntryID )
+#        nextVector = self.workingMemory.CalculateVector( thisWMEntryID, nextWMEntryID )
+#
+#        # Update FCell activity.
 #        self.UpdateFCellActivity()
-
-        # Get this columnSDR.
-        self.columnSDR = self.workingMemory.GetEntrySDR( thisWMEntryID )
-
-        # Activate the FCells.
-        self.ActivateFCells()
-
-        # Update working memory.
-        self.workingMemory.UpdateVectorAndReceiveColumns( lastVector, self.columnSDR, self.activeFCells, self.activeOCells )
-        # Update entries of working memory with active cells.
-        self.workingMemory.UpdateEntries( self.winnerFCells )
-
-        # If any winner cell was not predicted then create a new segment to the lastActive FCells.
-        for winCell in self.winnerFCells:
-            if not self.FCells[ winCell ].predicted:
-                self.FToFSegmentStruct.CreateSegment( self.FCells, self.lastWinnerFCells, winCell, lastVector, self.activeOCells )
-
-        # Perform learning on segments.
-        self.FToFSegmentStruct.SegmentLearning( self.FCells, self.OCells, self.lastWinnerFCells, self.lastActiveFCells, self.activeOCells, lastVector )
-
-        # Refresh segment states.
-        self.FToFSegmentStruct.UpdateSegmentActivity( self.FCells )
-
-        # Predict the next FCells.
-        self.PredictFCells( nextVector )
+#
+#        # Get this columnSDR.
+#        self.columnSDR = self.workingMemory.GetEntrySDR( thisWMEntryID )
+#
+#        # Activate the FCells.
+#        self.ActivateFCells()
+#
+#        # Update working memory.
+#        self.workingMemory.UpdateVectorAndReceiveColumns( lastVector, self.columnSDR, self.activeFCells, self.activeOCells )
+#        # Update entries of working memory with active cells.
+#        self.workingMemory.UpdateEntries( self.winnerFCells )
+#
+#        # If any winner cell was not predicted then create a new segment to the lastActive FCells.
+#        for winCell in self.winnerFCells:
+#            if not self.FCells[ winCell ].predicted:
+#                self.FToFSegmentStruct.CreateSegment( self.FCells, self.lastWinnerFCells, winCell, lastVector, self.activeOCells )
+#
+#        # Perform learning on segments.
+#        self.FToFSegmentStruct.SegmentLearning( self.FCells, self.OCells, self.lastWinnerFCells, self.lastActiveFCells, self.activeOCells, lastVector )
+#
+#        # Refresh segment states.
+#        self.FToFSegmentStruct.UpdateSegmentActivity( self.FCells )
+#
+#        # Predict the next FCells.
+#        self.PredictFCells( nextVector )
 
     def Compute( self, columnSDR, lastVector ):
     # Compute the action of vector memory, and learn on the synapses.
@@ -358,25 +363,25 @@ class VectorMemory:
         # Clear old active cells and get new ones active cells for this time step.
         self.ActivateFCells()
 
-        # Gather the segment averages, and send them to working memory to update its entry averages.
-        self.workingMemory.UpdateAverages( self.FToFSegmentStruct.GetSegmentAverages( self.FCells ) )
+#        # Gather the segment averages, and send them to working memory to update its entry averages.
+#        self.workingMemory.UpdateAverages( self.FToFSegmentStruct.GetSegmentAverages( self.FCells ) )
 
-        # Stimulate and activate OCells using the stimulated and active segments.
-        self.ActivateOCells()
-        self.CheckOCellFeeling()
+#        # Stimulate and activate OCells using the stimulated and active segments.
+#        self.ActivateOCells()
+#        self.CheckOCellFeeling()
 
-        # Update working memory.
-        self.workingMemory.UpdateVectorAndReceiveColumns( lastVector, self.columnSDR, self.activeFCells, self.activeOCells )
-        # Update entries of working memory with active cells.
-        self.workingMemory.UpdateEntries( self.winnerFCells )
+#        # Update working memory.
+#        self.workingMemory.UpdateVectorAndReceiveColumns( lastVector, self.columnSDR, self.activeFCells, self.activeOCells )
+#        # Update entries of working memory with active cells.
+#        self.workingMemory.UpdateEntries( self.winnerFCells )
 
 #        # If any winner cell was not predicted then create a new segment to the lastActive FCells.
-#        for winCell in self.winnerFCells:
-#            if not self.FCells[ winCell ].predicted:
-#                self.FToFSegmentStruct.CreateSegment( self.FCells, self.lastWinnerFCells, winCell, lastVector, self.activeOCells )
+        for winCell in self.winnerFCells:
+            if not self.FCells[ winCell ].predicted:
+                self.FToFSegmentStruct.CreateSegment( self.FCells, self.lastWinnerFCells, winCell, lastVector )
 
         # Perform learning on segments.
-#        self.FToFSegmentStruct.SegmentLearning( self.FCells, self.OCells, self.lastWinnerFCells, self.lastActiveFCells, self.activeOCells )
+        self.FToFSegmentStruct.SegmentLearning( self.FCells, self.lastWinnerFCells, self.lastActiveFCells, lastVector )
 
         # Refresh segment states.
         self.FToFSegmentStruct.UpdateSegmentActivity( self.FCells )

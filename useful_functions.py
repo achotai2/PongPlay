@@ -103,19 +103,17 @@ def FastIntersect( list1, list2 ):
 def ModThisSynapse( currentValue, howMuch, maxValue, minValue, notIfMax ):
 # Modify the synapse value and do checks, then return new value.
 
-    newValue = currentValue
+#    if ( notIfMax and newValue >= maxValue ) or ( newValue <= newValue and howMuch < 0.0 ):
+#        return currentValue
 
-    if ( notIfMax and newValue >= maxValue ) or ( newValue <= newValue and howMuch < 0.0 ):
-        return newValue
-
-    newValue += howMuch
+    newValue = currentValue + howMuch
 
     if newValue > 1.0:
-        newValue = 1.0
-    elif newValue < 0.0:
-        newValue = 0.0
-
-    return newValue
+        return 1.0
+    elif newValue <= 0.0:
+        return 0.0
+    else:
+        return newValue
 
 def ReturnMaxIndices( countsList, numToReturn, sortThisList ):
 # For the countsList sort the entries by count. Return a list of indices in the original list for maximum count.
@@ -204,22 +202,27 @@ def GenerateUnitySDR( SDRList, maxReturnSDRSize, cellsPerColumn ):
 
     return returnSDR
 
-def CalculateDistanceScore( vector, vectorDimensions, vectorCenter, standardDeviation, vectorConfidence ):
-# Using the received variables calculate the distance score as an x^2 distribution.
+def NumStandardDeviations( vector, vectorDimensions, vectorCenter, standardDeviation ):
+# Using the received variables calculate the number of standard deviations away from the vector center is vector.
 
-    if len( vector ) != vectorDimensions or len( vectorCenter ) != vectorDimensions or len( standardDeviation ) != vectorDimensions or len( vectorConfidence ) != vectorDimensions:
+    # Calculate the distance from this vector to our vectorCenter.
+    sum = 0
+    for d in range( vectorDimensions ):
+        sum += ( vectorCenter[ d ] - vector[ d ] ) ** 2
+    distance = sqrt( sum )
+
+    return ( distance / standardDeviation )
+
+def CalculateDistanceScore( vector, vectorDimensions, vectorCenter, standardDeviation ):
+# Using the received variables calculate the distance score as an normal distribution.
+
+    if len( vector ) != vectorDimensions or len( vectorCenter ) != vectorDimensions:
         print( "Vector sent to CalculateDistanceScore() not of same dimensions as vectorCenter." )
         exit()
 
-    # Calculate the distance score from this vector to our self.vectorCenter for each dimension.
-    distanceScore = []
-    for d in range( vectorDimensions ):
-        exponential = -0.5 * ( ( ( vectorCenter[ d ] - vector[ d ] ) / standardDeviation[ d ] ) ** 2 )
-        factor      = 0.39894228 * vectorConfidence[ d ] / standardDeviation[ d ]
-        distanceScore.append( factor * exp( exponential ) )
+    numStdDev = NumStandardDeviations( vector, vectorDimensions, vectorCenter, standardDeviation )
 
-    sum = 0
-    for i in range( vectorDimensions ):
-        sum += distanceScore[ d ] ** 2
+    # Generate score using a normal distribution about vectorCenter.
+    score = ( 1 / standardDeviation ) * 0.159154943 * exp( -0.5 * ( numStdDev ) ** 2 )
 
-    return sqrt( sum )
+    return score
