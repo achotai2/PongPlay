@@ -46,7 +46,7 @@ class AgentOrange:
             synPermInactiveDec         = 0.005,
             synPermActiveInc           = 0.04,
             synPermConnected           = 0.1,
-            boostStrength              = 0.0,
+            boostStrength              = 1.0,
             seed                       = -1,
             wrapAround                 = False
         )
@@ -59,8 +59,8 @@ class AgentOrange:
             "FActivationThresholdMin"   : 30,                   # Min threshold of active connected incident synapses...
             "FActivationThresholdMax"   : 30,                   # Max threshold of active connected incident synapses...# needed to activate segment.
             "initialPermanence"         : 0.3,                  # Initial permanence of a new synapse.
-            "permanenceIncrement"       : 0.04,                 # Amount by which permanences of synapses are incremented during learning.
-            "permanenceDecrement"       : 0.005,                # Amount by which permanences of synapses are decremented during learning.
+            "permanenceIncrement"       : 0.4,                 # Amount by which permanences of synapses are incremented during learning.
+            "permanenceDecrement"       : 0.1,                # Amount by which permanences of synapses are decremented during learning.
             "permanenceDecay"           : 0.001,                # Amount to decay permances each time step if < 1.0.
             "segmentDecay"              : 99999,                # If a segment hasn't been active in this many time steps then delete it.
             "segStimulatedDecay"        : 0.05,                 # The rate at which segment stimulation decays from 1.0 to 0.0

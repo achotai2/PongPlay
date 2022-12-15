@@ -26,12 +26,14 @@ class Segment:
             for iCell in range( iCol * vectorMemoryDict[ "cellsPerColumn" ], ( iCol * vectorMemoryDict[ "cellsPerColumn" ] ) + vectorMemoryDict[ "cellsPerColumn" ] ):
                 self.incidentSynapses.append( iCell )
                 self.incidentPermanences.append( uniform( 0, 1 ) )
-        self.incidentColumns     = []
+        self.incidentColumns     = incidentColumns.copy()
         self.terminalSynapses    = []           # Generate random synapse connections to all cells in terminal column.
+        self.terminalColumn      = terminalColumn
         self.terminalPermanences = []
         for tCell in range( terminalColumn * vectorMemoryDict[ "cellsPerColumn" ], ( terminalColumn * vectorMemoryDict[ "cellsPerColumn" ] ) + vectorMemoryDict[ "cellsPerColumn" ] ):
             self.terminalSynapses.append( tCell )
             self.terminalPermanences.append( uniform( 0, 1 ) )
+
         self.incidentActivation  = []           # A list of all columns that last overlapped with incidentSynapses.
 
         # Vector portion.
@@ -442,6 +444,9 @@ class Segment:
         else:
             return False
 
+# What I want is for the system to work, first of all. Why is it not working? It works when I increase the learning speed, but doesn't collapse when the
+# speed is turned down. 
+
     def Equality( self, other, equalityThreshold ):
     # Runs the following comparison of equality: segment1 == segment2, comparing their activation intersection, but not vector.
 
@@ -622,14 +627,20 @@ class SegmentStructure:
     # Delete segments that need deleting.
 
         # For all active segments, use the active incident cells and winner cells to modify synapses.
+        print("BEGINO-------------------------------------------------------------------------------")
         for activeSeg in self.activeSegments:
+            print( str(activeSeg))
+            print( "Terminal Synapses: " + str(self.segments[activeSeg].terminalSynapses))
+            print( "Permanence Before: " + str(self.segments[activeSeg].terminalPermanences))
             self.segments[ activeSeg ].ModifyAllSynapses( FCells )
+            print( "Permanence After: " + str(self.segments[activeSeg].terminalPermanences))
+        print("ENDO-------------------------------------------------------------------------------")
 
 #        self.AdjustThresholds( lastVector, activeOCells )
 
 #        self.OCellSegmentLearning( activeOCells, OCells )
 
-        self.CheckIfSegsIdentical( FCells )
+#        self.CheckIfSegsIdentical( FCells )
 
 #    def GetStimulatedOCells( self, numberOCells ):
 #    # Return the OCells count from all stimulated segments by summing their permances.

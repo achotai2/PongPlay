@@ -31,7 +31,7 @@ class VectorMemory:
          # Stores and deals with all FCell to FCell segments.
         self.FToFSegmentStruct = SegmentStructure( vectorMemoryDict )
 
-#        self.workingMemory = WorkingMemory( vectorMemoryDict )
+        self.workingMemory = WorkingMemory( vectorMemoryDict )
 
         # Create cells in object layer.
 #        self.OCells = []
