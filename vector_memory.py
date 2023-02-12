@@ -84,8 +84,8 @@ class VectorMemory:
 
         log_data.append( "Predicted Cells: " + str( len( self.predictedFCells ) ) + ", " + str( self.predictedFCells ) )
 
-#        log_data.append( "Working Memory Entries: " + str( self.workingMemory ) )
-#        log_data.append( "Working Memory Stable: " + str( self.workingMemory.reachedStability ) )
+        log_data.append( "Working Memory Entries: " + str( self.workingMemory ) )
+        log_data.append( "Working Memory Stable: " + str( self.workingMemory.reachedStability ) )
 
         log_data.append( "# of FToF-Segments: " + str( len( self.FToFSegmentStruct.segments ) ) + ", # of Active Segments: " + str( len( self.FToFSegmentStruct.activeSegments ) ) +
             ", # of Stimulated Segments: " + str( len( self.FToFSegmentStruct.stimulatedSegments ) ) )

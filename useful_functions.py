@@ -66,6 +66,28 @@ def RepeatInsort( list, val ):
         list.insert( idx, val )
         return idx
 
+def DelIfIn( list, val ):
+# For a sorted list if val is in list then delete it.
+
+    index = IndexIfItsIn( list, val )
+
+    if index != None:
+        del list[ index ]
+        return True
+    else:
+        return False
+
+def RemoveAndDecreaseIndices( list, val ):
+# If list contains val remove it. Also, decrease all values greater than val by one in list.
+
+    index = bisect_left( list, val )
+
+    if index < len( list ) and list[ index ] == val:
+        del list[ index ]
+    while index < len( list ):
+        list[ index ] -= 1
+        index += 1
+
 def CheckInside( vector1, vector2, checkRange ):
 # Checks if vector1 is within checkRange of vector2.
 
@@ -202,13 +224,13 @@ def GenerateUnitySDR( SDRList, maxReturnSDRSize, cellsPerColumn ):
 
     return returnSDR
 
-def NumStandardDeviations( vector, vectorDimensions, vectorCenter, standardDeviation ):
-# Using the received variables calculate the number of standard deviations away from the vector center is vector.
+def NumStandardDeviations( vector1, vectorDimensions, vector2, standardDeviation ):
+# Using the received variables calculate the number of standard deviations away from the vector2 is vector1.
 
     # Calculate the distance from this vector to our vectorCenter.
     sum = 0
     for d in range( vectorDimensions ):
-        sum += ( vectorCenter[ d ] - vector[ d ] ) ** 2
+        sum += ( vector2[ d ] - vector1[ d ] ) ** 2
     distance = sqrt( sum )
 
     return ( distance / standardDeviation )

@@ -59,11 +59,12 @@ class AgentOrange:
             "FActivationThresholdMin"   : 30,                   # Min threshold of active connected incident synapses...
             "FActivationThresholdMax"   : 30,                   # Max threshold of active connected incident synapses...# needed to activate segment.
             "initialPermanence"         : 0.3,                  # Initial permanence of a new synapse.
-            "permanenceIncrement"       : 0.4,                 # Amount by which permanences of synapses are incremented during learning.
-            "permanenceDecrement"       : 0.1,                # Amount by which permanences of synapses are decremented during learning.
+            "permanenceIncrement"       : 0.05,                 # Amount by which permanences of synapses are incremented during learning.
+            "permanenceDecrement"       : 0.01,                # Amount by which permanences of synapses are decremented during learning.
             "permanenceDecay"           : 0.001,                # Amount to decay permances each time step if < 1.0.
-            "segmentDecay"              : 99999,                # If a segment hasn't been active in this many time steps then delete it.
-            "segStimulatedDecay"        : 0.05,                 # The rate at which segment stimulation decays from 1.0 to 0.0
+            "segmentDecay"              : -1,                  # If a segment hasn't been active in this many time steps then delete it. If -1 then there is none.
+            "maxTotalSegments"          : -1,                 # Caps the maximum segments that can exist in a network. If -1 then there is no limit.
+            "segStimulatedDecay"        : 0.2,                 # The rate at which segment stimulation decays from 1.0 to 0.0
             "objectRepActivation"       : 25,                   # Number of cells in the Object level.
             "numObjectCells"            : 1000,                 # Number of active OCells in object layer at one time.
             "OCellActivationThreshold"  : 10,                   # Number of segments stimulated activating an OCell for it to become active.

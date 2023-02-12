@@ -18,7 +18,7 @@ class AgentLog:
         log_file.close()
 
         self.fcell_report_file_name = "Logs/" + startTimeString + "/F-Cell-Report_" + str( name ) + "_Agent.txt"
-        self.ocell_report_file_name = "Logs/" + startTimeString + "/O-Cell-Report_" + str( name ) + "_Agent.txt"
+#        self.ocell_report_file_name = "Logs/" + startTimeString + "/O-Cell-Report_" + str( name ) + "_Agent.txt"
 
         self.graphY1NumActiveCells = []
         self.graphY2NumSegs        = []
@@ -124,27 +124,27 @@ class AgentLog:
             fcell_report_file.write( "\n" )
         fcell_report_file.close()
 
-    def OCellReport( self, oCellData, stateData, endTime ):
-    # Prepare and write the OCell report log.
-
-        ocell_report_data = []
-
-        ocell_report_data.append( self.startTimeString )
-        ocell_report_data.append( "Agent: " + str( self.name ) )
-        ocell_report_data.append( "-------------------------------------------------------" )
-
-        # Prepare the OCell Report data.
-        oCellData.sort( key = lambda oCellData: oCellData[ 0 ] )
-        for entryIndex, entry in enumerate( oCellData ):
-            ocell_report_data.append( str( entry[ 0 ] ) + ": " + str( entry[ 1 ] ) )
-
-        # Write data into O-Cell-Report
-        ocell_report_data.append( "\n" + "Program End Time: " + str( endTime ) )
-        ocell_report_file = open( self.ocell_report_file_name, 'w' )
-        for line in ocell_report_data:
-            ocell_report_file.write( line )
-            ocell_report_file.write( "\n" )
-        ocell_report_file.close()
+#    def OCellReport( self, oCellData, stateData, endTime ):
+#    # Prepare and write the OCell report log.
+#
+#        ocell_report_data = []
+#
+#        ocell_report_data.append( self.startTimeString )
+#        ocell_report_data.append( "Agent: " + str( self.name ) )
+#        ocell_report_data.append( "-------------------------------------------------------" )
+#
+#        # Prepare the OCell Report data.
+#        oCellData.sort( key = lambda oCellData: oCellData[ 0 ] )
+#        for entryIndex, entry in enumerate( oCellData ):
+#            ocell_report_data.append( str( entry[ 0 ] ) + ": " + str( entry[ 1 ] ) )
+#
+#        # Write data into O-Cell-Report
+#        ocell_report_data.append( "\n" + "Program End Time: " + str( endTime ) )
+#        ocell_report_file = open( self.ocell_report_file_name, 'w' )
+#        for line in ocell_report_data:
+#            ocell_report_file.write( line )
+#            ocell_report_file.write( "\n" )
+#        ocell_report_file.close()
 
     def PlotGraphs( self ):
     # Plot the graphs.
@@ -237,11 +237,12 @@ class Logging:
             self.agentsLogs[ aIdx ].EndLog( datetime.datetime.now() )
 
             # Prepare Cell-Report and collect individual cell data.
-            fCellData, oCellData = Agent.GetStateData()
+#            fCellData, oCellData = Agent.GetStateData()
+            fCellData = Agent.GetStateData()
 
             self.agentsLogs[ aIdx ].FCellReport( fCellData, self.stateData, endTime, self.minAcceptablePercentage )
 
-            self.agentsLogs[ aIdx ].OCellReport( oCellData, self.stateData, endTime )
+#            self.agentsLogs[ aIdx ].OCellReport( oCellData, self.stateData, endTime )
 
             # Plot the graphs.
             self.agentsLogs[ aIdx ].PlotGraphs()

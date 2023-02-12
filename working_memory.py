@@ -1,5 +1,5 @@
 from random import randrange
-from useful_functions import BinarySearch, NoRepeatInsort, CheckInside, GenerateUnitySDR, FastIntersect, CalculateDistanceScore
+from useful_functions import BinarySearch, NoRepeatInsort, CheckInside, GenerateUnitySDR, FastIntersect, NumStandardDeviations
 
 class WorkingMemory:
 
@@ -19,7 +19,7 @@ class WorkingMemory:
         self.entryCenter     = []                   # The current relative origin position for each entry.
         self.entryTime       = []                   # The time since active for entry.
         self.entryCount      = []                   # The number of FToF segments which contributed to this entry.
-        self.standardDeviation  = []                   # The average distance scalar for this entry.
+#        self.standardDeviation  = []                   # The average distance scalar for this entry.
         self.vectConfidence  = []                   # The average vector confidence for this entry.
         self.SDRThreshold    = []                   # The average SDR overlap threshold for this entry.
 
@@ -143,7 +143,7 @@ class WorkingMemory:
         self.entryCenter     = []
         self.entryTime       = []
         self.entryCount      = []
-        self.standardDeviation  = []
+#        self.standardDeviation  = []
         self.vectConfidence  = []
         self.SDRThreshold    = []
 
@@ -154,7 +154,7 @@ class WorkingMemory:
         self.thisEntryID = 0
         self.lastEntryID = 0
 
-    def UpdateVectorAndReceiveColumns( self, vector, columnSDR, FCellSDR, OCellSDR ):
+    def UpdateVectorAndReceiveColumns( self, vector, columnSDR, FCellSDR ):
     # Use the vector to update all vectors stored in workingMemory items, and add timeStep.
     # Then, given the columnSDR, check overlap at zero-location. If above threshold make note of index.
     # Also check if reached stability, if it has then calculate unityCellSDR.
@@ -173,14 +173,15 @@ class WorkingMemory:
         fittingEntries      = []
         fittingScores       = []
         for entryIdx, entry in enumerate( self.entryColumnSDR ):
-            vectorScore  = CalculateDistanceScore( self.currentPosition, self.vectorMemoryDict[ "vectorDimensions" ], self.entryCenter[ entryIdx ], self.standardDeviation[ entryIdx ], self.vectConfidence[ entryIdx ] )
+            numStdDev = NumStandardDeviations( self.currentPosition, self.vectorMemoryDict[ "vectorDimensions" ], self.entryCenter[ entryIdx ], self.vectorMemoryDict[ "initialStandardDeviation" ] )
+#            vectorScore  = CalculateDistanceScore( self.currentPosition, self.vectorMemoryDict[ "vectorDimensions" ], self.entryCenter[ entryIdx ], self.standardDeviation[ entryIdx ], self.vectConfidence[ entryIdx ] )
             overlapScore = len( FastIntersect( columnSDR, entry ) )
 
-            if vectorScore >= 0.0 and overlapScore >= self.SDRThreshold[ entryIdx ]:
+            if numStdDev <= self.vectorMemoryDict[ "initialVectorConfidence" ] and overlapScore >= self.SDRThreshold[ entryIdx ]:
                 self.columnSDRFits = True
-
                 fittingEntries.append( entryIdx )
                 fittingScores.append( vectorScore * overlapScore )
+
         # If multiple entries fit choose the one with the highest score.
         if self.columnSDRFits:
             self.thisEntryIndex = fittingEntries[ max( range( len( fittingScores ) ), key = fittingScores.__getitem__ ) ]
@@ -206,7 +207,7 @@ class WorkingMemory:
             self.entryTime.append( 0 )
 #            self.unityCellSDR.append( [] )
             self.entryCount.append( 1 )
-            self.standardDeviation.append( [ self.vectorMemoryDict[ "initialStandardDeviation" ] ] * self.vectorMemoryDict[ "vectorDimensions" ] )
+#            self.standardDeviation.append( [ self.vectorMemoryDict[ "initialStandardDeviation" ] ] * self.vectorMemoryDict[ "vectorDimensions" ] )
             self.vectConfidence.append( [ self.vectorMemoryDict[ "initialVectorConfidence" ] ] * self.vectorMemoryDict[ "vectorDimensions" ] )
             self.SDRThreshold.append( self.vectorMemoryDict[ "FActivationThresholdMin" ] )
 
@@ -267,7 +268,7 @@ class WorkingMemory:
                 del self.entryCenter[ toDel ]
                 del self.entryTime[ toDel ]
                 del self.entryCount[ toDel ]
-                del self.standardDeviation[ toDel ]
+#                del self.standardDeviation[ toDel ]
                 del self.vectConfidence[ toDel ]
                 del self.SDRThreshold[ toDel ]
                 if self.thisEntryIndex > toDel:
@@ -282,8 +283,8 @@ class WorkingMemory:
             if newEntryCount != 0:
                 for d in range( self.vectorMemoryDict[ "vectorDimensions" ] ):
                     # Update average for this entries distance scalar.
-                    oldStandardDeviationWeight = self.standardDeviation[ self.thisEntryIndex ][ d ] * self.entryCount[ self.thisEntryIndex ]
-                    self.standardDeviation[ self.thisEntryIndex ][ d ] = ( oldStandardDeviationWeight + incomingAverages[ 1 ][ d ] ) / newEntryCount
+#                    oldStandardDeviationWeight = self.standardDeviation[ self.thisEntryIndex ][ d ] * self.entryCount[ self.thisEntryIndex ]
+#                    self.standardDeviation[ self.thisEntryIndex ][ d ] = ( oldStandardDeviationWeight + incomingAverages[ 1 ][ d ] ) / newEntryCount
 
                     # Update average for this entries vector confidence.
                     oldVectorConfidenceWeight = self.vectConfidence[ self.thisEntryIndex ][ d ] * self.entryCount[ self.thisEntryIndex ]

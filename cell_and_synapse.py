@@ -8,7 +8,7 @@ import math
 
 class Segment:
 
-    def __init__( self, vectorMemoryDict, incidentColumns, terminalColumn, vector ):
+    def __init__( self, vectorMemoryDict, incidentColumns, terminalColumn, incidentCells, terminalCells, vector ):
     # Initialize the inidividual segment structure class.
 
         self.vectorMemoryDict = vectorMemoryDict
@@ -18,21 +18,21 @@ class Segment:
         self.timeSinceActive     = 0                            # Time steps since this segment was active last.
         self.activationThreshold = vectorMemoryDict[ "FActivationThresholdMin" ]   # Minimum overlap required to activate segment.
         self.activeAboveThresh   = False
+        self.markedForDeletion   = False
 
         # Lateral synapse portion.
         self.incidentSynapses    = []
         self.incidentPermanences = []
-        for iCol in incidentColumns:
-            for iCell in range( iCol * vectorMemoryDict[ "cellsPerColumn" ], ( iCol * vectorMemoryDict[ "cellsPerColumn" ] ) + vectorMemoryDict[ "cellsPerColumn" ] ):
-                self.incidentSynapses.append( iCell )
-                self.incidentPermanences.append( uniform( 0, 1 ) )
+        for iCell in incidentCells:
+            self.incidentSynapses.append( iCell )
+            self.incidentPermanences.append( uniform( 0, vectorMemoryDict[ "initialPermanence" ] ) )
         self.incidentColumns     = incidentColumns.copy()
         self.terminalSynapses    = []           # Generate random synapse connections to all cells in terminal column.
         self.terminalColumn      = terminalColumn
         self.terminalPermanences = []
-        for tCell in range( terminalColumn * vectorMemoryDict[ "cellsPerColumn" ], ( terminalColumn * vectorMemoryDict[ "cellsPerColumn" ] ) + vectorMemoryDict[ "cellsPerColumn" ] ):
+        for tCell in terminalCells:
             self.terminalSynapses.append( tCell )
-            self.terminalPermanences.append( uniform( 0, 1 ) )
+            self.terminalPermanences.append( uniform( 0, vectorMemoryDict[ "initialPermanence" ] ) )
 
         self.incidentActivation  = []           # A list of all columns that last overlapped with incidentSynapses.
 
@@ -273,7 +273,8 @@ class Segment:
             del self.terminalSynapses[ terIndex ]
             del self.terminalPermanences[ terIndex ]
 
-# IF NO TERMINAL SYNAPSES THEN MARK FOR DELETION. CAN DELETE SEGMENTS BY MARKING THEM FOR DELETION AND THEN JUST GOING THROUGH EACH ONE AND CHECKING.
+        if len( self.terminalSynapses ) == 0:
+            self.markedForDeletion = True
 
     def IncreaseIncidentPermanence( self, incIndex ):
     # Increase permanence to indexed incident cell.
@@ -293,7 +294,8 @@ class Segment:
             del self.incidentSynapses[ incIndex ]
             del self.incidentPermanences[ incIndex ]
 
-# IF INCIDENT SYNAPSES BELOW SOME LEVEL THEN MARK FOR DELETION. CAN DELETE SEGMENTS BY MARKING THEM FOR DELETION AND THEN JUST GOING THROUGH EACH ONE AND CHECKING.
+        if len( self.incidentSynapses ) == 0:
+            self.markedForDeletion = True
 
     def ModifyAllSynapses( self, FCells ):
     # 1.) Decrease all terminal permanences to currently non-winner cells.
@@ -380,6 +382,15 @@ class Segment:
 
         return self.terminalSynapses.copy(), self.terminalPermanences.copy()
 
+    def ReturnTerminalActivation( self ):
+    # Returns the sum of terminal permanences.
+
+        sum = 0.0
+        for permance in self.terminalPermanences:
+            sum += permance
+
+        return sum
+
     def RefreshSegment( self ):
     # Updates or refreshes the state of the segment.
 
@@ -388,18 +399,11 @@ class Segment:
         self.activeAboveThresh  = False
         self.stimulated -= self.vectorMemoryDict[ "segStimulatedDecay" ]
 
-        if self.stimulated > 0.0:
-            stillStimulated = True
-        else:
-            stillStimulated = False
+        self.timeSinceActive += 1
+        if self.vectorMemoryDict[ "segmentDecay" ] != -1 and self.timeSinceActive > self.vectorMemoryDict[ "segmentDecay" ]:
+            self.markedForDeletion = True
 
-        self.timeSinceActive   += 1
-        if self.timeSinceActive >  self.vectorMemoryDict[ "segmentDecay" ]:
-            deadTooLong = True
-        else:
-            deadTooLong = False
-
-        return deadTooLong, stillStimulated
+        return self.stimulated > 0.0
 
     def RemoveIncidentSynapse( self, cellToDelete ):
     # Delete the incident synapse sent.
@@ -444,13 +448,10 @@ class Segment:
         else:
             return False
 
-# What I want is for the system to work, first of all. Why is it not working? It works when I increase the learning speed, but doesn't collapse when the
-# speed is turned down. 
-
-    def Equality( self, other, equalityThreshold ):
+    def Equality( self, other ):
     # Runs the following comparison of equality: segment1 == segment2, comparing their activation intersection, but not vector.
 
-        if len( FastIntersect( self.terminalSynapses, other.terminalSynapses ) ) == len( self.terminalSynapses ) and len( FastIntersect( self.incidentSynapses, other.incidentSynapses ) ) > equalityThreshold:
+        if len( FastIntersect( self.terminalSynapses, other.terminalSynapses ) ) == len( self.terminalSynapses ) and len( FastIntersect( self.incidentSynapses, other.incidentSynapses ) ) > self.vectorMemoryDict[ "equalityThreshold" ]:
             return True
         else:
             return False
@@ -469,6 +470,20 @@ class Segment:
         else:
             return None
 
+    def ReturnTimeSinceActive( self ):
+    # Return the time since this segment was last active.
+
+        return self.timeSinceActive
+
+    def MarkForDeletion( self ):
+    # Mark this segment for deletion.
+
+        if self.markedForDeletion:
+            return False
+
+        self.markedForDeletion = True
+        return True
+
 #-------------------------------------------------------------------------------
 
 class SegmentStructure:
@@ -482,11 +497,11 @@ class SegmentStructure:
         self.activeSegments     = []
         self.stimulatedSegments = []
 
-        self.segsToDelete   = []
+        self.numNonDeletedSegments = 0
 
         # Working Memory portion.-----------------------------------------------
-        self.numPositionCells   = 100
-        self.maxPositionRange   = 800
+#        self.numPositionCells   = 100
+#        self.maxPositionRange   = 800
 
     def HowManyActiveSegs( self ):
     # Return the number of active segments.
@@ -524,11 +539,17 @@ class SegmentStructure:
 #        return delIndex
 
     def DeleteSegmentsAndSynapse( self, FCells ):
-    # Uses list of indices of segments that need deletion. Deletes these segments from self.segments,
+    # Goes through all segments and checks if they are marked for deletion. Deletes these segments from self.segments,
     # and removes all references to them in self.incidentSegments.
 
-        if len( self.segsToDelete ) > 0:
-            for segIndex in reversed( self.segsToDelete ):
+        segsToDelete = []
+
+        for index, seg in enumerate( self.segments ):
+            if seg.markedForDeletion:
+                segsToDelete.append( index )
+
+        if len( segsToDelete ) > 0:
+            for segIndex in reversed( segsToDelete ):
                 # Delete any references to segment, and lower the index of all greater segment reference indices by one.
                 for fCell in FCells:
                     fCell.DeleteIncidentSegmentReference( segIndex )
@@ -555,12 +576,21 @@ class SegmentStructure:
                 # Delete the segment.
                 del self.segments[ segIndex ]
 
-        self.segsToDelete = []
-
     def CreateSegment( self, FCells, incidentColumns, terminalColumn, vector ):
     # Creates a new segment.
 
-        newSegment = Segment( self.vectorMemoryDict, incidentColumns, terminalColumn, vector )
+        incidentCells = []
+        terminalCells = []
+
+        # Form the new segments incident cells from all lastactive FCells.
+        # Form the new segments terminal cells from the winner FCell in this column.
+        for fIndex, fCell in enumerate( FCells ):
+            if fCell.lastActive:
+                incidentCells.append( fIndex )
+            if fCell.column == terminalColumn and fCell.winner:
+                terminalCells.append( fIndex )
+
+        newSegment = Segment( self.vectorMemoryDict, incidentColumns, terminalColumn, incidentCells, terminalCells, vector )
         self.segments.append( newSegment )
 
         indexOfNew = len( self.segments ) - 1
@@ -572,11 +602,34 @@ class SegmentStructure:
             for incCell in range( incCol * self.vectorMemoryDict[ "cellsPerColumn" ], ( incCol * self.vectorMemoryDict[ "cellsPerColumn" ] ) + self.vectorMemoryDict[ "cellsPerColumn" ] ):
                 FCells[ incCell ].IncidentToThisSeg( indexOfNew )
 
+        self.numNonDeletedSegments += 1
+
 #        for incCol in incidentColumnsList:
 #            self.AddSynapse( incCol, indexOfNew )
 
 #        if terminalCell != None:
 #            Cells[ terminalCell ].isTerminalCell += 1
+
+    def FindAndDeleteLongestInactive( self ):
+    # If there are too many segments find the segments that has been inactive longest and mark them for deletion.
+
+        if self.vectorMemoryDict[ "maxTotalSegments" ] != -1:
+            while self.numNonDeletedSegments > self.vectorMemoryDict[ "maxTotalSegments" ]:
+                longestInactiveIndex = 0
+                longestInactiveTime  = 0
+
+                for segIndex, segment in enumerate( self.segments ):
+                    if not segment.markedForDeletion and segment.ReturnTimeSinceActive() > longestInactiveTime:
+                        longestInactiveIndex = segIndex
+                        longestInactiveTime  = segment.ReturnTimeSinceActive()
+
+                self.MarkSegmentForDeletion( longestInactiveIndex )
+
+    def MarkSegmentForDeletion( self, segIndex ):
+    # Mark the segment for deletion.
+
+        if self.segments[ segIndex ].MarkForDeletion():
+            self.numNonDeletedSegments -= 1
 
     def UpdateSegmentActivity( self, FCells ):
     # Make every segment that was active inactive, and refreshes its synapse activation.
@@ -587,10 +640,7 @@ class SegmentStructure:
 
         # Increase time for all segments and deactivate them and alter their state.
         for index, segment in enumerate( self.segments ):
-            deadTooLong, stillStimulated = segment.RefreshSegment()
-
-            if deadTooLong:
-                NoRepeatInsort( self.segsToDelete, index )
+            stillStimulated = segment.RefreshSegment()
 
             if not stillStimulated:
                 i = IndexIfItsIn( self.stimulatedSegments, index )
@@ -599,6 +649,9 @@ class SegmentStructure:
 
         for fCell in FCells:
             fCell.RefreshTerminalActivation()
+
+        # If number of segments is above total segment limit then choose the ones to delete.
+        self.FindAndDeleteLongestInactive()
 
         self.DeleteSegmentsAndSynapse( FCells )
 
@@ -627,20 +680,14 @@ class SegmentStructure:
     # Delete segments that need deleting.
 
         # For all active segments, use the active incident cells and winner cells to modify synapses.
-        print("BEGINO-------------------------------------------------------------------------------")
         for activeSeg in self.activeSegments:
-            print( str(activeSeg))
-            print( "Terminal Synapses: " + str(self.segments[activeSeg].terminalSynapses))
-            print( "Permanence Before: " + str(self.segments[activeSeg].terminalPermanences))
             self.segments[ activeSeg ].ModifyAllSynapses( FCells )
-            print( "Permanence After: " + str(self.segments[activeSeg].terminalPermanences))
-        print("ENDO-------------------------------------------------------------------------------")
 
 #        self.AdjustThresholds( lastVector, activeOCells )
 
 #        self.OCellSegmentLearning( activeOCells, OCells )
 
-#        self.CheckIfSegsIdentical( FCells )
+        self.CheckIfSegsIdentical( FCells )
 
 #    def GetStimulatedOCells( self, numberOCells ):
 #    # Return the OCells count from all stimulated segments by summing their permances.
@@ -767,7 +814,7 @@ class SegmentStructure:
                 for entryIndex, entry in enumerate( segmentGroupings ):
                     thisEntryMatches = True
                     for entrySegment in entry:
-                        if not segment.Equality( self.segments[ entrySegment ], self.vectorMemoryDict[ "equalityThreshold" ] ):
+                        if not segment.Equality( self.segments[ entrySegment ] ):
                             thisEntryMatches = False
                             break
                     if thisEntryMatches:
@@ -782,11 +829,19 @@ class SegmentStructure:
 # THIS COULD PROBABLY BE MADE BETTER BY MERGING THEM, RATHER THAN JUST DELETING ONE.
         for group in segmentGroupings:
             if len( group ) > 1:
-                winnerSegment = group.pop( randrange( len( group ) ) )
+                winnerSegmentIdx = 0
+                winnerActivation = 0
+                for gIndex, gSeg in enumerate( group ):
+                    gActivation = self.segments[ gSeg ].ReturnTerminalActivation()
+                    if gActivation > winnerActivation:
+                        winnerSegmentIdx = gIndex
+                        winnerActivation = gActivation
 
-                for segIndex in range( len( group ) ):
+                group.pop( winnerSegmentIdx )
+
+                for segIndex in group:
                     print("DELETED IDENTIAL SEGMENTS--------------------")
-                    NoRepeatInsort( self.segsToDelete, group[ segIndex ] )
+                    self.MarkSegmentForDeletion( segIndex )
 
 # ------------------------------------------------------------------------------
 
