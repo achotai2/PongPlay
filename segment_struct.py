@@ -1,20 +1,22 @@
 from random import uniform, choice, sample, randrange, shuffle
 from bisect import bisect_left
 from collections import Counter
-from useful_functions import BinarySearch, NoRepeatInsort, ModThisSynapse, IndexIfItsIn, FastIntersect, GenerateUnitySDR, NumStandardDeviations, CalculateDistanceScore, RemoveAndDecreaseIndices
+from useful_functions import BinarySearch, NoRepeatInsort, ModThisSynapse, IndexIfItsIn, FastIntersect, GenerateUnitySDR, NumStandardDeviations, CalculateDistanceScore, DelIfIn
 import numpy
 import math
 #from time import time
 
 class Segment:
 
-    def __init__( self, vectorMemoryDict, incidentColumns, terminalColumns, incidentCells, terminalCells, vectorSDR ):
+    def __init__( self, vectorMemoryDict, incidentColumns, terminalColumns, incidentCells, terminalCells, vectorSDR, ID, confidenceScoreRank ):
     # Initialize the inidividual segment structure class.
     # Generate random permanence connections to all received incident cells, and to terminal cell.
 
+        self.ID = ID
+
         self.vectorMemoryDict = vectorMemoryDict
 
-        self.active              = False                         # True means it's predictive, and above threshold terminal cells fired.
+        self.active              = True                        # True means it's predictive, and above threshold terminal cells fired.
         self.timeSinceActive     = 0                            # Time steps since this segment was active last.
         self.activationThreshold = vectorMemoryDict[ "FActivationThresholdMin" ]   # Minimum overlap required to activate segment.
         self.markedForDeletion   = False
@@ -33,10 +35,20 @@ class Segment:
             self.terminalSynapses.append( tCell )
             self.terminalPermanences.append( uniform( 0, vectorMemoryDict[ "initialPermanence" ] ) )
 
+        self.confidenceScore     = 0.0
+        for perm in self.terminalPermanences:
+            self.confidenceScore += perm
+        self.confidenceScoreRank = confidenceScoreRank
+
         self.incidentActivation  = []           # A list of all columns that last overlapped with incidentSynapses.
 
         # Vector portion.
         self.vectorSynapses = vectorSDR.copy()
+
+    def SetConfidenceRank( self, newRank ):
+    # Set the confidenceRank.
+
+        self.confidenceScoreRank = newRank
 
     def Inside( self, vectorSDR ):
     # Checks if given vector position is inside range of number of standard deviations allowed.
@@ -62,6 +74,7 @@ class Segment:
     # Increases the permanence of indexed terminal cell.
 
         self.terminalPermanences[ terIndex ] += self.vectorMemoryDict[ "permanenceIncrement" ]
+        self.confidenceScore += self.vectorMemoryDict[ "permanenceIncrement" ]
 
         if self.terminalPermanences[ terIndex ] >= 1.0:
             self.terminalPermanences[ terIndex ] = 1.0
@@ -70,6 +83,21 @@ class Segment:
     # Decreases permanence of indexed terminal cell.
 
         self.terminalPermanences[ terIndex ] -= self.vectorMemoryDict[ "permanenceDecrement" ]
+        self.confidenceScore -= self.vectorMemoryDict[ "permanenceDecrement" ]
+
+        if self.terminalPermanences[ terIndex ] <= 0.0:
+            # If it is below 0.0 then delete it.
+            del self.terminalSynapses[ terIndex ]
+            del self.terminalPermanences[ terIndex ]
+
+        if len( self.terminalSynapses ) == 0:
+            self.markedForDeletion = True
+
+    def DecayTerminalPermanence( self, terIndex ):
+    # Decreases permanence of indexed terminal cell.
+
+        self.terminalPermanences[ terIndex ] -= self.vectorMemoryDict[ "permanenceDecay" ]
+        self.confidenceScore -= self.vectorMemoryDict[ "permanenceDecay" ]
 
         if self.terminalPermanences[ terIndex ] <= 0.0:
             # If it is below 0.0 then delete it.
@@ -87,26 +115,56 @@ class Segment:
         if self.incidentPermanences[ incIndex ] >= 1.0:
             self.incidentPermanences[ incIndex ] = 1.0
 
-    def DecreaseIncidentPermanence( self, incIndex ):
+    def DecreaseIncidentPermanence( self, incIndex, FCells ):
     # Decreases permanence of indexed incident cell.
 
         self.incidentPermanences[ incIndex ] -= self.vectorMemoryDict[ "permanenceDecrement" ]
 
         if self.incidentPermanences[ incIndex ] <= 0.0:
             # If it is below 0.0 then delete it.
-            del self.incidentSynapses[ incIndex ]
-            del self.incidentPermanences[ incIndex ]
+
+            thsad = self.incidentSynapses[incIndex]
+            self.RemoveIncidentSynapse( incIndex, FCells )
+
+    def RemoveIncidentSynapse( self, cellIndexToDelete, FCells ):
+    # Delete the incident synapse sent.
+
+        FCells[ self.incidentSynapses[ cellIndexToDelete ] ].DeleteIncidentSegmentReference( self.ID )
+
+        del self.incidentSynapses[ cellIndexToDelete ]
+        del self.incidentPermanences[ cellIndexToDelete ]
+        del self.incidentColumns[ cellIndexToDelete ]
 
         if len( self.incidentSynapses ) == 0:
             self.markedForDeletion = True
 
-    def ModifyAllSynapses( self, FCells ):
+    def NewIncidentSynapse( self, synapseToCreate, FCells ):
+    # Create a new incident synapse.
+
+        FCells[ synapseToCreate ].IncidentToThisSeg( self.ID )
+
+        synLengthBefore = len( self.incidentSynapses )
+        colLengthBefore = len( self.incidentColumns )
+
+        indexToPut = NoRepeatInsort( self.incidentSynapses, synapseToCreate )
+        self.incidentPermanences.insert( indexToPut, uniform( 0, self.vectorMemoryDict[ "initialPermanence" ] ) )
+        NoRepeatInsort( self.incidentColumns, FCells[ synapseToCreate ].column )
+
+        if len( self.incidentSynapses ) == synLengthBefore:
+            print( "NewIncidentSynapse(): Tried to add an incident synapse, but already exists." )
+            exit()
+        if len( self.incidentColumns ) == colLengthBefore:
+            print( "NewIncidentSynapse(): Tried to add an incident synapse, but synapse to this column already exists." )
+            exit()
+
+    def ModifyAllSynapses( self, FCells, lastActive ):
     # 1.) Decrease all terminal permanences to currently non-winner cells.
     # 2.) If terminal cell is winner increase permance for this terminal synapse;
     # 3.) Increase permanence strength to last-active incident cells that already have synapses;
     # 4.) Decrease synapse strength to inactive incident cells that already have synapses;
     # 5.) Build new synapses to active incident winner cells that don't have synapses;
 
+        if self.active:
             # 1.)...
             for terIndex, terCell in enumerate( self.terminalSynapses ):
                 if not FCells[ terCell ].winner:
@@ -115,15 +173,40 @@ class Segment:
                 else:
                     self.IncreaseTerminalPermanence( terIndex )
 
-#            synapseToAdd = lastActiveFCells.copy()                          # Used for 5 above.
+            synapseToAdd = lastActive.copy()                          # Used for 5 below.
 
             for incIndex, incCell in enumerate( self.incidentSynapses ):
                 # 3.)...
                 if FCells[ incCell ].lastActive:
                     self.IncreaseIncidentPermanence( incIndex )
+                    del synapseToAdd[ IndexIfItsIn( synapseToAdd, incCell ) ]
                 # 4.)...
-                else:
-                    self.DecreaseIncidentPermanence( incIndex )
+                elif not FCells[ incCell ].lastActive:
+                    self.DecreaseIncidentPermanence( incIndex, FCells )
+
+            # 5.)...
+            if len( synapseToAdd ) > 0:
+                # Check to make sure this segment doesn't already have a synapse to this column.
+                realSynapsesToAdd = []
+
+                for synAdd in synapseToAdd:
+                    if FCells[ synAdd ].lastWinner and not BinarySearch( self.incidentColumns, FCells[ synAdd ].column ):
+                        realSynapsesToAdd.append( synAdd )
+
+                # Choose which synapses to actually add, since we can only add n-number per time step.
+                reallyRealSynapsesToAdd = sample( realSynapsesToAdd, min( len( realSynapsesToAdd ), self.vectorMemoryDict[ "maxSynapsesToAddPer" ] ) )
+                for toAdd in reallyRealSynapsesToAdd:
+                    self.NewIncidentSynapse( toAdd, FCells )
+
+                # If the number of synapses is above maxSynapsesPerSegment then delete random synapses.
+                while self.vectorMemoryDict[ "maxSynapsesPerSegment" ] - len( self.incidentSynapses ) < 0:
+                    toDelIndex = randrange( len( self.incidentSynapses ) )
+                    self.RemoveIncidentSynapse( toDelIndex, FCells )
+
+        else:
+            if self.ReturnTerminalActivation() <= self.vectorMemoryDict[ "initialPermanence" ]:
+                for terIndex, terCell in enumerate( self.terminalSynapses ):
+                    self.DecayTerminalPermanence( terIndex )
 
     def CheckActivation( self, vectorSDR ):
     # Checks the incidentActivation against activationThreshold to see if segment becomes active and stimulated.
@@ -160,49 +243,6 @@ class Segment:
         self.timeSinceActive += 1
         if self.vectorMemoryDict[ "segmentDecay" ] != -1 and self.timeSinceActive > self.vectorMemoryDict[ "segmentDecay" ]:
             self.markedForDeletion = True
-
-    def RemoveIncidentSynapse( self, cellToDelete ):
-    # Delete the incident synapse sent.
-
-        index = IndexIfItsIn( self.incidentSynapses, cellToDelete )
-        if index != None:
-            del self.incidentSynapses[ index ]
-            del self.incidentPermanences[ index ]
-            del self.incidentColumns[ index ]
-        else:
-            print( "RemoveIncidentSynapse(): Attempt to remove synapse from segment, but synapse doesn't exist." )
-            exit()
-
-    def NewIncidentSynapse( self, synapseToCreate ):
-    # Create a new incident synapse.
-
-        index = bisect_left( self.incidentColumns, synapseToCreate )
-
-        if index == len( self.incidentColumns ):
-            self.incidentColumns.append( columnToCreate )
-            for incCell in range( synapseToCreate * self.vectorMemoryDict[ "cellsPerColumn" ], ( synapseToCreate * self.vectorMemoryDict[ "cellsPerColumn" ] ) + self.vectorMemoryDict[ "cellsPerColumn" ] ):
-                self.incidentSynapses.append( synapseToCreate )
-                self.incidentPermanences.append( uniform( 0, 1 ) )
-
-        elif self.incidentSynapses[ index ] != synapseToCreate:
-            self.incidentColumns.insert( index, columnToCreate )
-            for incCell in range( synapseToCreate * self.vectorMemoryDict[ "cellsPerColumn" ], ( synapseToCreate * self.vectorMemoryDict[ "cellsPerColumn" ] ) + self.vectorMemoryDict[ "cellsPerColumn" ] ):
-                self.incidentSynapses.insert( ( index * self.vectorMemoryDict[ "cellsPerColumn" ] ) + incCell, synapseToCreate )
-                self.incidentPermanences.insert( index * self.vectorMemoryDict[ "cellsPerColumn" ] + incCell, uniform( 0, 1 ) )
-
-        else:
-            print( "NewIncidentSynapse(): Attempt to add synapse to segment, but synapse to column already exists." )
-            exit()
-
-    def AlreadySynapseToColumn( self, checkSynapse ):
-    # Checks if this segment has a synapse to the same column as checkSynapse.
-
-        checkColumn = int( checkSynapse / self.vectorMemoryDict[ "cellsPerColumn" ] )
-
-        if BinarySearch( self.incidentColumns, checkColumn ):
-            return True
-        else:
-            return False
 
     def Equality( self, other ):
     # Runs the following comparison of equality: segment1 == segment2, comparing their activation intersection, but not vector.
@@ -248,7 +288,14 @@ class SegmentStructure:
         self.vectorMemoryDict = vectorMemoryDict
 
         self.segments           = []                                  # Stores all segments structures.
-        self.activeSegments     = []
+        self.availableSegments  = []                                  # Stores the available segment numbers for new segments.
+        for i in range( vectorMemoryDict[ "maxTotalSegments" ] ):
+            self.segments.append( None )
+            self.availableSegments.append( i )
+
+        self.confidenceScoreRanks = []                                # Stores the confidence score rank for all segments.
+
+        self.activeSegments     = []                                  # Stores currently active segments indices.
 
         self.numNonDeletedSegments = 0
 
@@ -257,42 +304,66 @@ class SegmentStructure:
 
         return len( self.activeSegments )
 
+    def HowManySegs( self ):
+    # Return the number of segments.
+
+        return self.numNonDeletedSegments
+
     def DeleteSegmentsAndSynapse( self, FCells ):
     # Goes through all segments and checks if they are marked for deletion. Deletes these segments from self.segments,
     # and removes all references to them in self.incidentSegments.
 
-        segsToDelete = []
-
         for index, seg in enumerate( self.segments ):
-            if seg.markedForDeletion:
-                segsToDelete.append( index )
-
-        if len( segsToDelete ) > 0:
-            for segIndex in reversed( segsToDelete ):
-                # Delete any references to segment, and lower the index of all greater segment reference indices by one.
+            if seg != None and seg.markedForDeletion:
+                # Delete any references to segment in FCells.
                 for fCell in FCells:
-                    fCell.DeleteIncidentSegmentReference( segIndex )
+                    fCell.DeleteIncidentSegmentReference( seg.ID )
 
-                # Delete any references to this segment if they exist, and modify indices.
-                RemoveAndDecreaseIndices( self.activeSegments, segIndex )
+                # Delete any references to this segment if they exist in activeSegments.
+                DelIfIn( self.activeSegments, seg.ID )
 
-                # Delete the segment.
-                del self.segments[ segIndex ]
+                # Delete the entry from confidenceScoreRank
+                del self.confidenceScoreRanks[ seg.confidenceScoreRank ]
+
+                # Add entry index available again.
+                NoRepeatInsort( self.availableSegments, seg.ID )
+
+                # Delete the segment by setting the entry to None state.
+                self.segments[ index ] = None
+
+    def MarkSegmentForDeletion( self, segIndex ):
+    # Mark the segment for deletion.
+
+# CAN ACTUALLY JUST DELETE IT NOW I THINK, NO NEED TO MARK IT AND DELETE IT LATER, NO?
+        if self.segments[ segIndex ] != None and self.segments[ segIndex ].MarkForDeletion():
+            self.numNonDeletedSegments -= 1
+        if self.segments[ segIndex ] == None:
+            print( "MarkSegmentForDeletion(): Segment marked for deletion already doesn't exist." )
+            exit()
 
     def CreateSegment( self, FCells, incidentColumns, terminalColumn, incidentCells, terminalCell, vectorSDR ):
     # Creates a new segment.
+
+        # Get index and remove it from list.
+        indexOfNew = self.availableSegments.pop( 0 )
 
         # Assemble and generate the new segment, and add it to list.
         terminalCells = []
         terminalCells.append( terminalCell )
         terminalColumns = []
         terminalColumns.append( terminalColumn )
-        newSegment = Segment( self.vectorMemoryDict, incidentColumns, terminalColumns, incidentCells, terminalCells, vectorSDR )
-        self.segments.append( newSegment )
+        newSegment = Segment( self.vectorMemoryDict, incidentColumns, terminalColumns, incidentCells, terminalCells, vectorSDR, indexOfNew, None )
+        if self.segments[ indexOfNew ] == None:
+            self.segments[ indexOfNew ] = newSegment
+        else:
+            print( "CreateSegment(): Tried to create new segment but this entry was already full." )
+            exit()
 
         # Add segment to active segments list.
-        indexOfNew = len( self.segments ) - 1
-        self.activeSegments.append( indexOfNew )
+        NoRepeatInsort( self.activeSegments, indexOfNew )
+
+        # Update the segment confidenceScore ranking.
+        self.InsertNewConfidenceRank( indexOfNew )
 
         # Add reference to segment in incident cells.
         for incCell in incidentCells:
@@ -309,17 +380,11 @@ class SegmentStructure:
                 longestInactiveTime  = 0
 
                 for segIndex, segment in enumerate( self.segments ):
-                    if not segment.markedForDeletion and segment.ReturnTimeSinceActive() > longestInactiveTime:
+                    if segment != None and not segment.markedForDeletion and segment.ReturnTimeSinceActive() > longestInactiveTime:
                         longestInactiveIndex = segIndex
                         longestInactiveTime  = segment.ReturnTimeSinceActive()
 
                 self.MarkSegmentForDeletion( longestInactiveIndex )
-
-    def MarkSegmentForDeletion( self, segIndex ):
-    # Mark the segment for deletion.
-
-        if self.segments[ segIndex ].MarkForDeletion():
-            self.numNonDeletedSegments -= 1
 
     def UpdateSegmentActivity( self, FCells ):
     # Make every segment that was active inactive, and refreshes its synapse activation.
@@ -330,7 +395,8 @@ class SegmentStructure:
 
         # Increase time for all segments and deactivate them and alter their state.
         for index, segment in enumerate( self.segments ):
-            segment.RefreshSegment()
+            if segment != None:
+                segment.RefreshSegment()
 
         for fCell in FCells:
             fCell.RefreshTerminalActivation()
@@ -340,16 +406,90 @@ class SegmentStructure:
 
         self.DeleteSegmentsAndSynapse( FCells )
 
-    def SegmentLearning( self, FCells ):
+    def InsertNewConfidenceRank( self, segmentID ):
+    # Given the segments confidence score input the newly created segment and update its confidence ranking.
+
+        # Find the rank spot.
+        newRank = 0
+        while newRank < len( self.confidenceScoreRanks ) and self.segments[ self.confidenceScoreRanks[ newRank ] ].confidenceScore < self.segments[ segmentID ].confidenceScore:
+            newRank += 1
+
+        # Set the segments new rank in segment.
+        self.segments[ segmentID ].SetConfidenceRank( newRank )
+
+        # Shift all the higher ranks up by one.
+        rankO = newRank
+        while rankO < len( self.confidenceScoreRanks ):
+            self.segments[ self.confidenceScoreRanks[ rankO ] ].SetConfidenceRank( self.segments[ self.confidenceScoreRanks[ rankO ] ].confidenceScoreRank + 1 )
+            rankO += 1
+
+        # Insert the segment into our list.
+        if newRank < len( self.confidenceScoreRanks ):
+            self.confidenceScoreRanks.insert( newRank, segmentID )
+        else:
+            self.confidenceScoreRanks.append( segmentID )
+
+    def UpdateConfidenceRanks( self, segmentID ):
+    # Update the ranking list of segments.
+    # Lowest indices are lowest confidenceScore. Highest indices are highest confidenceScore.
+
+        print( sorted( self.confidenceScoreRanks ) )
+        for seg in self.segments:
+            if seg != None and self.confidenceScoreRanks[ seg.confidenceScoreRank ] != seg.ID:
+                print( seg.ID )
+                print( self.confidenceScoreRanks[ seg.confidenceScoreRank ] )
+                exit()
+
+        # Loop until ranking is in correct spot.
+        while True:
+            if self.segments[ segmentID ].confidenceScoreRank > 0:
+                earlierRankedSeg = self.confidenceScoreRanks[ self.segments[ segmentID ].confidenceScoreRank - 1 ]
+            else:
+                earlierRankedSeg = None
+            if self.segments[ segmentID ].confidenceScoreRank < len( self.confidenceScoreRanks ) - 1:
+                laterRankedSeg   = self.confidenceScoreRanks[ self.segments[ segmentID ].confidenceScoreRank + 1 ]
+            else:
+                laterRankedSeg   = None
+
+            # Check if should move it back one.
+            if earlierRankedSeg != None and self.segments[ segmentID ].confidenceScore < self.segments[ earlierRankedSeg ].confidenceScore:
+                # Update list entries.
+                del self.confidenceScoreRanks[ self.segments[ segmentID ].confidenceScoreRank ]
+                self.confidenceScoreRanks.insert( self.segments[ segmentID ].confidenceScoreRank - 1, segmentID )
+
+                # Update segment ranking reference.
+                self.segments[ segmentID ].SetConfidenceRank( self.segments[ segmentID ].confidenceScoreRank - 1 )
+                self.segments[ earlierRankedSeg ].SetConfidenceRank( self.segments[ segmentID ].confidenceScoreRank + 1 )
+
+            # Check if should move it forward one.
+            elif laterRankedSeg != None and self.segments[ segmentID ].confidenceScore > self.segments[ laterRankedSeg ].confidenceScore:
+                # Update list entries.
+                del self.confidenceScoreRanks[ self.segments[ segmentID ].confidenceScoreRank ]
+                self.confidenceScoreRanks.insert( self.segments[ segmentID ].confidenceScoreRank + 1, segmentID )
+
+                # Update segment ranking reference.
+                self.segments[ segmentID ].SetConfidenceRank( self.segments[ segmentID ].confidenceScoreRank + 1 )
+                self.segments[ laterRankedSeg ].SetConfidenceRank( self.segments[ segmentID ].confidenceScoreRank - 1 )
+
+            # If it is in right spot then we leave it.
+            else:
+                break
+
+    def SegmentLearning( self, FCells, lastActiveFCells ):
     # Perform learning on all active and inactive segments.
     # Refresh all segments then perform learning on them.
     # Delete segments that need deleting.
 
         # For all active segments, use the active incident cells and winner cells to modify synapses.
-        for activeSeg in self.activeSegments:
-            self.segments[ activeSeg ].ModifyAllSynapses( FCells )
+        for seg in self.segments:
+            if seg != None:
+                seg.ModifyAllSynapses( FCells, lastActiveFCells )
+                self.UpdateConfidenceRanks( seg.ID )
 
-        self.CheckIfSegsIdentical( FCells )
+#        self.CheckIfSegsIdentical( FCells )
+
+#        for index, seg in enumerate(self.segments):
+#            print( str(index) + ": " + str(seg.terminalPermanences))
 
     def StimulateSegments( self, FCells, activeCells, vectorSDR ):
     # Using the activeCells and next vector find all segments that activate from this.
@@ -366,9 +506,9 @@ class SegmentStructure:
                 self.segments[ entry ].IncidentCellActive( incCell, incCol )
 
         # Check the overlap of all segments and see which ones are active, and add the terminalCell to stimulatedCells.
-        for segIndex, segment in enumerate( self.segments ):
-            if segment.CheckActivation( vectorSDR ):                               # Checks incident overlap above threshold and if vector is inside.
-                NoRepeatInsort( self.activeSegments, segIndex )
+        for segment in self.segments:
+            if segment != None and segment.CheckActivation( vectorSDR ):                               # Checks incident overlap above threshold and if vector is inside.
+                NoRepeatInsort( self.activeSegments, segment.ID )
 
                 # Add to the terminal stimulation of the terminal cell.
                 terminalCells, terminalPermanences = segment.GetTerminalSynapses()
@@ -379,15 +519,6 @@ class SegmentStructure:
                     FCells[ terminalCells[ index ] ].AddTerminalStimulation( terminalPermanences[ index ] )
 
         return predictedCells
-
-    def ChangePermanence( self, FCells, incCell, segIndex, permanenceChange ):
-    # Change the permanence of synapse incident on incCell, part of segIndex, by permanenceChange.
-
-        if FCells[ incCell ].ConnectionToSegment( segIndex ):
-            self.segments.ModifyIncidentSynapse( incCell, permanenceChange )
-        else:
-            print("ChangePermanence(): Referenced cell does not have incident connection to referenced segment.")
-            exit()
 
     def ThereCanBeOnlyOne( self, FCells, activeCellsList ):
     # Choose the winner cell for column by choosing active one with highest terminal activation.
@@ -413,8 +544,8 @@ class SegmentStructure:
 
         segmentGroupings = []
 
-        for index, segment in enumerate( self.segments ):
-            if segment.active:
+        for segment in self.segments:
+            if segment != None and segment.active:
                 chosenIndex = None
                 for entryIndex, entry in enumerate( segmentGroupings ):
                     thisEntryMatches = True
@@ -427,9 +558,9 @@ class SegmentStructure:
                         break
 
                 if chosenIndex == None:
-                    segmentGroupings.append( [ index ] )
+                    segmentGroupings.append( [ segment.ID ] )
                 else:
-                    segmentGroupings[ chosenIndex ].append( index )
+                    segmentGroupings[ chosenIndex ].append( segment.ID )
 
 # THIS COULD PROBABLY BE MADE BETTER BY MERGING THEM, RATHER THAN JUST DELETING ONE.
         for group in segmentGroupings:

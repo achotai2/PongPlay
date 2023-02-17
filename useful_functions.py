@@ -68,14 +68,14 @@ def RepeatInsort( list, val ):
 
 def DelIfIn( list, val ):
 # For a sorted list if val is in list then delete it.
+# Returns index where item was.
 
     index = IndexIfItsIn( list, val )
 
     if index != None:
         del list[ index ]
-        return True
-    else:
-        return False
+
+    return index
 
 def RemoveAndDecreaseIndices( list, val ):
 # If list contains val remove it. Also, decrease all values greater than val by one in list.

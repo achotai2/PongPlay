@@ -73,7 +73,7 @@ class NewVectorMemory:
 
         log_data.append( "Predicted Cells: " + str( len( self.predictedFCells ) ) + ", " + str( self.predictedFCells ) )
 
-        log_data.append( "# of FToF-Segments: " + str( len( self.FToFSegmentStruct.segments ) ) + ", # of Active Segments: " + str( len( self.FToFSegmentStruct.activeSegments ) ) )
+        log_data.append( "# of FToF-Segments: " + str( self.FToFSegmentStruct.HowManySegs() ) + ", # of Active Segments: " + str( self.FToFSegmentStruct.HowManyActiveSegs() ) )
 
     def ActivateFCells( self ):
     # Uses activated columns and cells in predicted state to put cells in active states.
@@ -196,9 +196,10 @@ class NewVectorMemory:
                 for burCell in range( burCol * self.vectorMemoryDict[ "cellsPerColumn" ], ( burCol * self.vectorMemoryDict[ "cellsPerColumn" ] ) + self.vectorMemoryDict[ "cellsPerColumn" ] ):
                     if self.FCells[ burCell ].winner:
                         self.FToFSegmentStruct.CreateSegment( self.FCells, self.lastColumnSDR, burCol, self.lastWinnerFCells, burCell, self.lastVectorSDR )
+                        break
 
         # Perform learning on segments.
-        self.FToFSegmentStruct.SegmentLearning( self.FCells )
+        self.FToFSegmentStruct.SegmentLearning( self.FCells, self.lastActiveFCells )
 
         # Refresh segment states.
         self.FToFSegmentStruct.UpdateSegmentActivity( self.FCells )

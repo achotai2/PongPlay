@@ -63,8 +63,8 @@ class AgentRun:
             "objectRepActivation"       : 25,                   # Number of cells in the Object level.
             "numObjectCells"            : 1000,                 # Number of active OCells in object layer at one time.
             "OCellActivationThreshold"  : 10,                   # Number of segments stimulated activating an OCell for it to become active.
-            "maxSynapsesToAddPer"       : 5,                    # The maximum number of FToFSynapses added to a segment during creation.
-            "maxSynapsesPerSegment"     : 50,                   # Maximum number of active synapses allowed on a segment.
+            "maxSynapsesToAddPer"       : 2,                    # The maximum number of FToFSynapses added to a segment during creation.
+            "maxSynapsesPerSegment"     : 45,                   # Maximum number of incident synapses allowed on a segment.
             "equalityThreshold"         : 35,                   # The number of equal synapses for two segments to be considered identical.
             "vectorDimensions"          : vpsVectorDim,         # The number of dimensions of our vector space.
             "initialStandardDeviation"  : 100,                  # Scales the distance a vector can activate a segment. Smaller means more activation distance.
@@ -82,6 +82,7 @@ class AgentRun:
             "maxVectorSynapseRadius"    : 15,
             "permanenceLowerThreshold"  : 0.1,                  # The lower threshold for synapses.
             "maxSequenceLength"         : 1,                    # The length of the cell context sequences in vector memory.
+            "maxTotalSegments"          : 5000,                 # The maximum number of segments allowed in the network.
         }
 
         # The eye input pooler.
@@ -96,7 +97,7 @@ class AgentRun:
             synPermInactiveDec         = 0.005,
             synPermActiveInc           = 0.04,
             synPermConnected           = 0.1,
-            boostStrength              = 1.0,
+            boostStrength              = 0.0,
             seed                       = -1,
             wrapAround                 = False
         )

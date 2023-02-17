@@ -1,7 +1,7 @@
 from bisect import bisect_left
 from random import uniform, choice, sample, randrange, shuffle
 from collections import Counter
-from useful_functions import BinarySearch, NoRepeatInsort, ModThisSynapse, IndexIfItsIn, FastIntersect, GenerateUnitySDR, NumStandardDeviations, CalculateDistanceScore, RemoveAndDecreaseIndices
+from useful_functions import BinarySearch, NoRepeatInsort, ModThisSynapse, IndexIfItsIn, FastIntersect, GenerateUnitySDR, NumStandardDeviations, CalculateDistanceScore, DelIfIn
 import math
 
 class FCell:
@@ -77,7 +77,7 @@ class FCell:
     # Checks if this cell is incident to this segment, if so then delete it. Also lower all segment references by one.
 
         if len( self.asIncident ) > 0:
-            RemoveAndDecreaseIndices( self.asIncident, segIndex )
+            DelIfIn( self.asIncident, segIndex )
 
     def ReturnIncidentOn( self ):
     # Returns this cells column, and a list of segments this cell is incident on.
@@ -103,44 +103,3 @@ class FCell:
     # Returns terminalActivation.
 
         return self.terminalActivation
-
-# ------------------------------------------------------------------------------
-
-class OCell:
-
-    def __init__( self ):
-    # Create new object cell.
-
-        self.active = False
-
-        self.isTerminalCell = 0
-
-        self.segActivationLevel     = 0
-        self.overallActivationLevel = 0.0
-
-    def AddActivation( self, synapseActivation ):
-    # Add plust one to segActivationLevel, and add synapseActivation to the overallActivationLevel .
-
-        self.segActivationLevel += 1
-        self.overallActivationLevel += synapseActivation
-
-    def ResetState( self ):
-    # Make inactive and reset activationLevel.
-
-        self.active = False
-
-        self.segActivationLevel     = 0
-        self.overallActivationLevel = 0.0
-
-    def CheckSegmentActivationLevel( self, threshold ):
-    # Returns True if segActivationLevel is above threshold.
-
-        if self.segActivationLevel >= threshold:
-            return True
-        else:
-            return False
-
-    def ReturnOverallActivation( self ):
-    # Returns self.overallActivationLevel.
-
-        return self.overallActivationLevel
