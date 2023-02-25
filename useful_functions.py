@@ -40,7 +40,7 @@ def IndexIfItsIn( list, val ):
 
 def NoRepeatInsort( list, val ):
 # Inserts item into list in a sorted way, if it does not already exist (no repeats).
-# Returns the index where it inserted val into list.
+# Returns the index where it inserted val into list, or where value already existed.
 
     idx = bisect_left( list, val )
 
@@ -50,6 +50,9 @@ def NoRepeatInsort( list, val ):
 
     elif list[ idx ] != val:
         list.insert( idx, val )
+        return idx
+
+    else:
         return idx
 
 def RepeatInsort( list, val ):
@@ -122,7 +125,7 @@ def FastIntersect( list1, list2 ):
 
     return intersection
 
-def ModThisSynapse( currentValue, howMuch, maxValue, minValue, notIfMax ):
+def ModThisSynapse( currentValue, howMuch, minValue, maxValue ):
 # Modify the synapse value and do checks, then return new value.
 
 #    if ( notIfMax and newValue >= maxValue ) or ( newValue <= newValue and howMuch < 0.0 ):

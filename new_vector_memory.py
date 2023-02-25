@@ -73,7 +73,10 @@ class NewVectorMemory:
 
         log_data.append( "Predicted Cells: " + str( len( self.predictedFCells ) ) + ", " + str( self.predictedFCells ) )
 
-        log_data.append( "# of FToF-Segments: " + str( self.FToFSegmentStruct.HowManySegs() ) + ", # of Active Segments: " + str( self.FToFSegmentStruct.HowManyActiveSegs() ) )
+        log_data.append( "# of FToF-Segments: " + str( self.FToFSegmentStruct.HowManySegs() )
+            + ", # of Active Segments: " + str( self.FToFSegmentStruct.HowManyActiveSegs() )
+            + ", # of Winner Segments: " + str( self.FToFSegmentStruct.HowManyWinnerSegs() )
+            )
 
     def ActivateFCells( self ):
     # Uses activated columns and cells in predicted state to put cells in active states.
@@ -138,7 +141,7 @@ class NewVectorMemory:
             cell.predicted = False
         self.predictedFCells = []
 
-        if self.sequenceLength < self.vectorMemoryDict[ "maxSequenceLength" ]:
+        if self.FToFSegmentStruct.LastWinnerIsConfident():
             # Get the predicted FCells and make them predicted state.
             self.predictedFCells = self.FToFSegmentStruct.StimulateSegments( self.FCells, self.activeFCells, self.newVectorSDR )
 
@@ -174,8 +177,6 @@ class NewVectorMemory:
     def Compute( self, columnSDR, newVectorSDR ):
     # Compute the action of vector memory, and learn on the synapses.
 
-#        print( "Vector Memory Computing..." )
-
         self.lastColumnSDR = self.columnSDR.copy()
         self.columnSDR     = columnSDR.sparse.tolist()
 
@@ -190,7 +191,7 @@ class NewVectorMemory:
         # Clear old active cells and get new ones active cells for this time step.
         self.ActivateFCells()
 
-        # If any winner cell was not predicted (bursting) then create a new segment with synapses to all FCells in column.
+        # If any winner cell was not predicted (bursting) then create a new segment terminal to it.
         if self.sequenceLength > 0:
             for burCol in self.burstingCols:
                 for burCell in range( burCol * self.vectorMemoryDict[ "cellsPerColumn" ], ( burCol * self.vectorMemoryDict[ "cellsPerColumn" ] ) + self.vectorMemoryDict[ "cellsPerColumn" ] ):

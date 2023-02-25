@@ -83,6 +83,7 @@ class AgentRun:
             "permanenceLowerThreshold"  : 0.1,                  # The lower threshold for synapses.
             "maxSequenceLength"         : 1,                    # The length of the cell context sequences in vector memory.
             "maxTotalSegments"          : 5000,                 # The maximum number of segments allowed in the network.
+            "confidenceConfident"       : 0.8,                  # The confidenceScore above which we consider the segment is a good prediction.
         }
 
         # The eye input pooler.

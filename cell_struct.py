@@ -1,7 +1,7 @@
 from bisect import bisect_left
 from random import uniform, choice, sample, randrange, shuffle
 from collections import Counter
-from useful_functions import BinarySearch, NoRepeatInsort, ModThisSynapse, IndexIfItsIn, FastIntersect, GenerateUnitySDR, NumStandardDeviations, CalculateDistanceScore, DelIfIn
+from useful_functions import BinarySearch, NoRepeatInsort, IndexIfItsIn, FastIntersect, GenerateUnitySDR, NumStandardDeviations, CalculateDistanceScore, DelIfIn
 import math
 
 class FCell:
