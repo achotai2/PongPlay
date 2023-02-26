@@ -6,8 +6,10 @@ import math
 
 class FCell:
 
-    def __init__( self, colID ):
+    def __init__( self, colID, vectorMemoryDict ):
     # Create a new feature level cell with synapses to OCells.
+
+        self.vectorMemoryDict = vectorMemoryDict
 
         # FCell state variables.
         self.active     = False
@@ -19,7 +21,9 @@ class FCell:
         self.column     = colID
 
         self.asIncident = []            # Keeps track of what segments this cell is incident on.
+        self.asTerminal = []
 
+# PERHAPS WE DON'T NEED? COULD JUST USE THE asTerminal LIST TO GET ALL SEGMENTS TERMINAL AND THEN ADD UP THEIR PERMANENCE STRENGTH... BUT MIGHT BE SLOWER.
         self.terminalActivation = 0.0
 
 #        self.isTerminalCell = 0           # Number of segments this cell is terminal on.
@@ -73,16 +77,40 @@ class FCell:
             print( "IncidentToThisSeg(): Tried to add reference to segment, but already exists." )
             exit()
 
+        if len( self.asIncident ) > self.vectorMemoryDict[ "maxIncidentOnCell" ]:
+            return True
+        else:
+            return False
+
+    def TerminalToThisSeg( self, segIndex ):
+    # Add reference that this cell is on this segment.
+
+        lengthBefore = len( self.asTerminal )
+
+        NoRepeatInsort( self.asTerminal, segIndex )
+
+        if len( self.asTerminal ) == lengthBefore:
+            print( "TerminalToThisSeg(): Tried to add reference to segment, but already exists." )
+            exit()
+
     def DeleteIncidentSegmentReference( self, segIndex ):
     # Checks if this cell is incident to this segment, if so then delete it. Also lower all segment references by one.
 
-        if len( self.asIncident ) > 0:
-            DelIfIn( self.asIncident, segIndex )
+        DelIfIn( self.asIncident, segIndex )
+
+    def DeleteTerminalSegmentReference( self, segIndex ):
+    # Checks if this cell is incident to this segment, if so then delete it. Also lower all segment references by one.
+
+        DelIfIn( self.asTerminal, segIndex )
 
     def ReturnIncidentOn( self ):
     # Returns this cells column, and a list of segments this cell is incident on.
 
         return self.column, self.asIncident.copy()
+
+    def ReturnTerminalOn( self ):
+
+        return self.asTerminal.copy()
 
     def ConnectionToSegment( segIndex ):
     # Returns true if this cell is incident on segment segIndex, otherwise returns False.

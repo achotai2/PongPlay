@@ -51,37 +51,16 @@ class AgentRun:
         self.termsDict = {
             "columnDimensions"          : 2048,                 # Dimensions of the column space.
             "cellsPerColumn"            : 4,                    # Number of cells per column.
-            "FActivationThresholdMin"   : 30,                   # Min threshold of active connected incident synapses...
+            "FActivationThresholdMin"   : 15,                   # Min threshold of active connected incident synapses...
             "FActivationThresholdMax"   : 30,                   # Max threshold of active connected incident synapses...# needed to activate segment.
             "initialPermanence"         : 0.3,                  # Initial permanence of a new synapse.
             "permanenceIncrement"       : 0.05,                 # Amount by which permanences of synapses are incremented during learning.
             "permanenceDecrement"       : 0.01,                # Amount by which permanences of synapses are decremented during learning.
             "permanenceDecay"           : 0.001,                # Amount to decay permances each time step if < 1.0.
-            "segmentDecay"              : -1,                  # If a segment hasn't been active in this many time steps then delete it. If -1 then there is none.
-            "maxTotalSegments"          : -1,                 # Caps the maximum segments that can exist in a network. If -1 then there is no limit.
-            "segStimulatedDecay"        : 0.2,                 # The rate at which segment stimulation decays from 1.0 to 0.0
-            "objectRepActivation"       : 25,                   # Number of cells in the Object level.
-            "numObjectCells"            : 1000,                 # Number of active OCells in object layer at one time.
-            "OCellActivationThreshold"  : 10,                   # Number of segments stimulated activating an OCell for it to become active.
-            "maxSynapsesToAddPer"       : 2,                    # The maximum number of FToFSynapses added to a segment during creation.
-            "maxSynapsesPerSegment"     : 45,                   # Maximum number of incident synapses allowed on a segment.
-            "equalityThreshold"         : 35,                   # The number of equal synapses for two segments to be considered identical.
-            "vectorDimensions"          : vpsVectorDim,         # The number of dimensions of our vector space.
-            "initialStandardDeviation"  : 100,                  # Scales the distance a vector can activate a segment. Smaller means more activation distance.
-            "initialVectorConfidence"   : 1.0,                  # The max center score for a vector activating a segment.
-            "vectorScoreLowerThreshold" : 0.001,                # The minimum vector score needed to activate a segment.
-            "vectorScoreUpperThreshold" : 0.9,
-            "vectorConfidenceShift"     : 0.04,
-            "standardDeviationShift"    : 1,
-            "WMEntryDecay"              : 5,
-            "WMEntrySize"               : 3,
-            "WMStabilityPct"            : 1.0,
-            "vectorRange"               : 1600,
-            "numVectorSynapses"         : 100,
-            "vectorSynapseScaleFactor"  : 0.8,
-            "maxVectorSynapseRadius"    : 15,
             "permanenceLowerThreshold"  : 0.1,                  # The lower threshold for synapses.
-            "maxSequenceLength"         : 1,                    # The length of the cell context sequences in vector memory.
+            "maxSynapsesToAddPer"       : 1,                    # The maximum number of incident synapses added to a segment during learning.
+            "maxSynapsesPerSegment"     : 40,                   # Maximum number of incident synapses allowed on a segment.
+            "maxIncidentOnCell"         : 200,                   # The maximum number of segments that cell can be incident to.
             "maxTotalSegments"          : 5000,                 # The maximum number of segments allowed in the network.
             "confidenceConfident"       : 0.8,                  # The confidenceScore above which we consider the segment is a good prediction.
         }
@@ -98,7 +77,7 @@ class AgentRun:
             synPermInactiveDec         = 0.005,
             synPermActiveInc           = 0.04,
             synPermConnected           = 0.1,
-            boostStrength              = 0.0,
+            boostStrength              = 0.5,
             seed                       = -1,
             wrapAround                 = False
         )

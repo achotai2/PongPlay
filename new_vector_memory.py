@@ -4,7 +4,7 @@ from segment_struct import SegmentStructure
 from cell_struct import FCell
 from useful_functions import NoRepeatInsort, BinarySearch, ReturnMaxIndices, FastIntersect
 #import numpy as np
-#from time import time
+from time import time
 
 class NewVectorMemory:
 
@@ -18,12 +18,10 @@ class NewVectorMemory:
         self.burstingCols    = []
         self.notBurstingCols = []
 
-        self.sequenceLength  = 0
-
         # Create cells in feature layer.
         self.FCells = []
         for i in range( vectorMemoryDict[ "columnDimensions" ] * vectorMemoryDict[ "cellsPerColumn" ] ):
-            self.FCells.append( FCell( int( i / vectorMemoryDict[ "cellsPerColumn" ] ) ) )
+            self.FCells.append( FCell( int( i / vectorMemoryDict[ "cellsPerColumn" ] ), vectorMemoryDict ) )
         self.activeFCells     = []
         self.lastActiveFCells = []
         self.winnerFCells     = []
@@ -141,18 +139,12 @@ class NewVectorMemory:
             cell.predicted = False
         self.predictedFCells = []
 
-        if self.FToFSegmentStruct.LastWinnerIsConfident():
-            # Get the predicted FCells and make them predicted state.
-            self.predictedFCells = self.FToFSegmentStruct.StimulateSegments( self.FCells, self.activeFCells, self.newVectorSDR )
+        # Get the predicted FCells and make them predicted state.
+        self.predictedFCells = self.FToFSegmentStruct.StimulateSegments( self.FCells, self.activeFCells, self.newVectorSDR )
 
-            # Make the selected cells predicted state.
-            for predCell in self.predictedFCells:
-                self.FCells[ predCell ].predicted = True
-
-            self.sequenceLength += 1
-
-        else:
-            self.sequenceLength = 0
+        # Make the selected cells predicted state.
+        for predCell in self.predictedFCells:
+            self.FCells[ predCell ].predicted = True
 
     def UpdateFCellActivity( self ):
     # Updates the FCell states for a next time step.
@@ -189,20 +181,30 @@ class NewVectorMemory:
             exit()
 
         # Clear old active cells and get new ones active cells for this time step.
+        startTime = time()
         self.ActivateFCells()
+        print( "Activate: " + str( time() - startTime ) )
 
         # If any winner cell was not predicted (bursting) then create a new segment terminal to it.
-        if self.sequenceLength > 0:
-            for burCol in self.burstingCols:
-                for burCell in range( burCol * self.vectorMemoryDict[ "cellsPerColumn" ], ( burCol * self.vectorMemoryDict[ "cellsPerColumn" ] ) + self.vectorMemoryDict[ "cellsPerColumn" ] ):
-                    if self.FCells[ burCell ].winner:
-                        self.FToFSegmentStruct.CreateSegment( self.FCells, self.lastColumnSDR, burCol, self.lastWinnerFCells, burCell, self.lastVectorSDR )
-                        break
+        startTime = time()
+        for burCol in self.burstingCols:
+            for burCell in range( burCol * self.vectorMemoryDict[ "cellsPerColumn" ], ( burCol * self.vectorMemoryDict[ "cellsPerColumn" ] ) + self.vectorMemoryDict[ "cellsPerColumn" ] ):
+                if self.FCells[ burCell ].winner:
+                    self.FToFSegmentStruct.CreateSegment( self.FCells, self.lastColumnSDR, burCol, self.lastWinnerFCells, burCell, self.lastVectorSDR )
+                    break
+        print( "Create Segment: " + str( time() - startTime ) )
 
         # Perform learning on segments.
-        self.FToFSegmentStruct.SegmentLearning( self.FCells, self.lastActiveFCells )
+        startTime = time()
+        self.FToFSegmentStruct.SegmentLearning( self.FCells, self.activeFCells, self.lastActiveFCells )
+        print( "Segment Learning: " + str( time() - startTime ) )
 
         # Refresh segment states.
+        startTime = time()
         self.FToFSegmentStruct.UpdateSegmentActivity( self.FCells )
+        print( "Update Actvitiy: " + str( time() - startTime ) )
 
+# COULD EVEN SPEED THIS UP BY NOT RUNNING. SIMPLY WHEN WE GO TO ACTIVE CELLS WE USE THE ACTIVE TERMINAL COLUMNS TO GET THE SEGMENTS WHICH ARE TERMINAL THERE AND CHECK THEM ONLY.
+        startTime = time()
         self.PredictFCells()
+        print( "Predict: " + str( time() - startTime ) )

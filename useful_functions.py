@@ -1,6 +1,22 @@
 from bisect import bisect_left
 from random import randrange, shuffle
 from math import sqrt, exp
+import numpy as np
+from scipy.special import comb
+
+def SmoothStep( x, x_min = 0, x_max = 1, N = 1 ):
+# Uses the input x (between x_min and x_max) and converts it to a smooth step function value that is N differentiable,
+# with a returned value between 0.0 and 1.0.
+
+    x = np.clip( ( x - x_min ) / ( x_max - x_min ), 0, 1 )
+
+    result = 0
+    for n in range( 0, N + 1 ):
+         result += comb( N + n, n ) * comb( 2 * N + 1, N - n ) * ( -x ) ** n
+
+    result *= x ** ( N + 1 )
+
+    return result
 
 def Within ( value, minimum, maximum, equality ):
 # Checks if value is <= maximum and >= minimum.

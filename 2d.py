@@ -191,8 +191,8 @@ while True:
     senseOrgan.goto( sensePosX, sensePosY )
 
     # Move the enemy.
-    if not randomInput:
-        MoveEnemy()
+#    if not randomInput:
+#        MoveEnemy()
 
     # Write segment data to individual files for report.
     logFile.WriteDataToFiles( [ agentRun ] )
