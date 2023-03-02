@@ -180,19 +180,19 @@ while True:
     logFile.AddToTimeStep()
 
     # Run agent brain and get motor vector.
-    organVector = agentRun.Brain( objectList, sensePosX, sensePosY, 0.0, randomInput )
+    agentVector = agentRun.Brain( objectList, sensePosX, sensePosY, 0.0, randomInput )
 
     # Accumulate the active cells and segments and input into report data.
     logFile.AccumulateReportData( [ agentRun ], [ sensePosX, sensePosY ] )
 
     # Update the sense organ position.
-    sensePosX += organVector[ 0 ]
-    sensePosY += organVector[ 1 ]
+    sensePosX += agentVector[ 0 ]
+    sensePosY += agentVector[ 1 ]
     senseOrgan.goto( sensePosX, sensePosY )
 
     # Move the enemy.
-#    if not randomInput:
-#        MoveEnemy()
+    if not randomInput:
+        MoveEnemy()
 
     # Write segment data to individual files for report.
     logFile.WriteDataToFiles( [ agentRun ] )

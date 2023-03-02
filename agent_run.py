@@ -14,7 +14,7 @@ from htm.bindings.algorithms import Classifier
 
 class AgentRun:
 
-    def __init__( self, name, senseResX, senseResY, spatialDimensions, otherDimensions ):
+    def __init__( self, name, senseResX, senseResY, motorVectorDims ):
 
         self.ID = name
 
@@ -36,7 +36,7 @@ class AgentRun:
         self.XTransformEncoder = ScalarEncoder( XEncodeParams )
         YEncodeParams = ScalarEncoderParameters()
         YEncodeParams.activeBits = 5
-        YEncodeParams.radius     = 10
+        YEncodeParams.radius     = 20
         YEncodeParams.clipInput  = True
         YEncodeParams.minimum    = -200
         YEncodeParams.maximum    = 200
@@ -45,13 +45,13 @@ class AgentRun:
 
         self.transformEncodingWidth = self.XTransformEncoder.size + self.YTransformEncoder.size
 
-        vpsVectorDim = spatialDimensions + otherDimensions
-
         # The dictionary for defining useful terms.
         self.termsDict = {
             "columnDimensions"          : 2048,                 # Dimensions of the column space.
+            "boostStrength"             : 0.5,                  # Spatial memory boostStrength.
+            "numActiveColumnsPerInhArea": 40,                   # Number of columns active given input.
             "cellsPerColumn"            : 4,                    # Number of cells per column.
-            "FActivationThresholdMin"   : 15,                   # Min threshold of active connected incident synapses...
+            "FActivationThresholdMin"   : 30,                   # Min threshold of active connected incident synapses...
             "FActivationThresholdMax"   : 30,                   # Max threshold of active connected incident synapses...# needed to activate segment.
             "initialPermanence"         : 0.3,                  # Initial permanence of a new synapse.
             "permanenceIncrement"       : 0.05,                 # Amount by which permanences of synapses are incremented during learning.
@@ -59,8 +59,8 @@ class AgentRun:
             "permanenceDecay"           : 0.001,                # Amount to decay permances each time step if < 1.0.
             "permanenceLowerThreshold"  : 0.1,                  # The lower threshold for synapses.
             "maxSynapsesToAddPer"       : 1,                    # The maximum number of incident synapses added to a segment during learning.
-            "maxSynapsesPerSegment"     : 40,                   # Maximum number of incident synapses allowed on a segment.
-            "maxIncidentOnCell"         : 200,                   # The maximum number of segments that cell can be incident to.
+            "maxSynapsesPerSegment"     : 100,                   # Maximum number of incident synapses allowed on a segment.
+            "maxIncidentOnCell"         : 10,                   # The maximum number of segments that cell can be incident to.
             "maxTotalSegments"          : 5000,                 # The maximum number of segments allowed in the network.
             "confidenceConfident"       : 0.8,                  # The confidenceScore above which we consider the segment is a good prediction.
         }
@@ -68,16 +68,16 @@ class AgentRun:
         # The eye input pooler.
         self.sp = SpatialPooler(
             inputDimensions            = ( self.eyeInputEncodingWidth, ),
-            columnDimensions           = ( 2048, ),
+            columnDimensions           = ( self.termsDict[ "columnDimensions" ], ),
             potentialPct               = 0.85,
             potentialRadius            = self.eyeInputEncodingWidth,
             globalInhibition           = True,
             localAreaDensity           = 0,
-            numActiveColumnsPerInhArea = 40,
+            numActiveColumnsPerInhArea = self.termsDict[ "numActiveColumnsPerInhArea" ],
             synPermInactiveDec         = 0.005,
             synPermActiveInc           = 0.04,
             synPermConnected           = 0.1,
-            boostStrength              = 0.5,
+            boostStrength              = self.termsDict[ "boostStrength" ],
             seed                       = -1,
             wrapAround                 = False
         )
@@ -94,7 +94,7 @@ class AgentRun:
             synPermInactiveDec         = 0.005,
             synPermActiveInc           = 0.04,
             synPermConnected           = 0.1,
-            boostStrength              = 1.0,
+            boostStrength              = self.termsDict[ "boostStrength" ],
             seed                       = -1,
             wrapAround                 = False
         )
@@ -103,7 +103,7 @@ class AgentRun:
 
         self.lastVector = []
         self.newVector  = []
-        for i in range( vpsVectorDim ):
+        for i in range( motorVectorDims ):
             self.lastVector.append( 0 )
             self.newVector.append( 0 )
 
@@ -269,6 +269,12 @@ class AgentRun:
         newVectorSDR = self.EncodeTransformationData( self.newVector ).sparse.tolist()
 
         # Compute the action of vector memory, and learn on the synapses.
-        self.vp.Compute( senseSDR, newVectorSDR )
+        newVectorSDR = self.vp.Compute( senseSDR )
 
-        return self.newVector.copy()
+        toReturn = []
+        for x in range( len( self.newVector ) ):
+            toReturn.append( x )
+        for y in range( len( motorVector ) ):
+            toReturn.append( y )
+
+        return toReturn

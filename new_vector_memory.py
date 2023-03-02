@@ -65,7 +65,7 @@ class NewVectorMemory:
 
 #        log_data.append( "Active O-Cells: " + str( len( self.activeOCells ) ) + ", " + str( self.activeOCells ) )
 
-        log_data.append( "Bursting Column Pct: " + str( len( self.burstingCols ) / self.vectorMemoryDict[ "columnDimensions" ] * 100 ) + "%" )
+        log_data.append( "Bursting Column Pct: " + str( len( self.burstingCols ) / self.vectorMemoryDict[ "numActiveColumnsPerInhArea" ] * 100 ) + "%" )
         log_data.append( "Bursting Columns: " + str( self.burstingCols ) )
         log_data.append( "Non-Bursting Columns: " + str( self.notBurstingCols ) )
 
@@ -75,6 +75,21 @@ class NewVectorMemory:
             + ", # of Active Segments: " + str( self.FToFSegmentStruct.HowManyActiveSegs() )
             + ", # of Winner Segments: " + str( self.FToFSegmentStruct.HowManyWinnerSegs() )
             )
+
+    def ThereCanBeOnlyOne( self, activeCellsList ):
+    # Choose the winner cell for column by choosing active one with highest terminal activation.
+
+        # Find the predicted cell
+        greatestActivation = 0
+        greatestCell       = activeCellsList[ 0 ]
+
+        if len( activeCellsList ) > 1:
+            for cell in activeCellsList:
+                if self.FCells[ cell ].GetTerminalActivation() > greatestActivation:
+                    greatestActivation = self.FCells[ cell ].GetTerminalActivation()
+                    greatestCell       = cell
+
+        return greatestCell
 
     def ActivateFCells( self ):
     # Uses activated columns and cells in predicted state to put cells in active states.
@@ -101,7 +116,7 @@ class NewVectorMemory:
                 self.notBurstingCols.append( col )
 
                 # Choose the winner cell.
-                winnerThisColumn = self.FToFSegmentStruct.ThereCanBeOnlyOne( self.FCells, predictedCellsThisCol )
+                winnerThisColumn = self.ThereCanBeOnlyOne( predictedCellsThisCol )
                 # Make only winner active.
                 activeThisColumn.append( winnerThisColumn )
 
@@ -166,6 +181,12 @@ class NewVectorMemory:
             self.FCells[ winCell ].lastWinner = True
         self.winnerFCells = []
 
+    def GetMotorVector( self ):
+    # Check if the winning predicted segments have above threshold confidence. If they do then return a motor vector of appropriate size.
+
+        if self.FToFSegmentStruct.SegmentsAreConfident():
+            return self.FToFSegmentStruct.GetVector()
+
     def Compute( self, columnSDR, newVectorSDR ):
     # Compute the action of vector memory, and learn on the synapses.
 
@@ -187,11 +208,14 @@ class NewVectorMemory:
 
         # If any winner cell was not predicted (bursting) then create a new segment terminal to it.
         startTime = time()
-        for burCol in self.burstingCols:
-            for burCell in range( burCol * self.vectorMemoryDict[ "cellsPerColumn" ], ( burCol * self.vectorMemoryDict[ "cellsPerColumn" ] ) + self.vectorMemoryDict[ "cellsPerColumn" ] ):
-                if self.FCells[ burCell ].winner:
-                    self.FToFSegmentStruct.CreateSegment( self.FCells, self.lastColumnSDR, burCol, self.lastWinnerFCells, burCell, self.lastVectorSDR )
-                    break
+        if len( self.burstingCols ) / self.vectorMemoryDict[ "numActiveColumnsPerInhArea" ] > 0.5:
+            self.FToFSegmentStruct.CreateSegment( self.FCells, self.lastColumnSDR, self.columnSDR, self.lastWinnerFCells, self.winnerFCells, self.lastVectorSDR )
+
+#        for burCol in self.burstingCols:
+#            for burCell in range( burCol * self.vectorMemoryDict[ "cellsPerColumn" ], ( burCol * self.vectorMemoryDict[ "cellsPerColumn" ] ) + self.vectorMemoryDict[ "cellsPerColumn" ] ):
+#                if self.FCells[ burCell ].winner:
+#                    self.FToFSegmentStruct.CreateSegment( self.FCells, self.lastColumnSDR, burCol, self.lastWinnerFCells, burCell, self.lastVectorSDR )
+#                    break
         print( "Create Segment: " + str( time() - startTime ) )
 
         # Perform learning on segments.
@@ -208,3 +232,5 @@ class NewVectorMemory:
         startTime = time()
         self.PredictFCells()
         print( "Predict: " + str( time() - startTime ) )
+
+        return self.GetMotorVector()
