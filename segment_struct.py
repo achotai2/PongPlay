@@ -1,14 +1,14 @@
 from random import uniform, choice, sample, randrange, shuffle
 from bisect import bisect_left
 from collections import Counter
-from useful_functions import SmoothStep, BinarySearch, NoRepeatInsort, ModThisSynapse, IndexIfItsIn, FastIntersect, GenerateUnitySDR, NumStandardDeviations, CalculateDistanceScore, DelIfIn
+from useful_functions import SmoothStep, BinarySearch, NoRepeatInsort, ModThisSynapse, IndexIfItsIn, FastIntersect, DelIfIn, IndexOfGreatest, NoRepeatConcatenate
 import numpy
 import math
 from time import time
 
 class Segment:
 
-    def __init__( self, vectorMemoryDict, incidentColumns, terminalColumns, incidentCells, terminalCells, vectorSDR, ID ):
+    def __init__( self, vectorMemoryDict, ID, incidentColumns, terminalColumns, incidentCells, terminalCells, vectorSDR, positionSDR ):
     # Initialize the inidividual segment structure class.
     # Generate random permanence connections to all received incident cells, and to terminal cell.
 
@@ -17,7 +17,7 @@ class Segment:
         self.vectorMemoryDict = vectorMemoryDict
 
         self.active              = True                        # True means it's predictive, and above threshold terminal cells fired.
-        self.winner              = False                       # Only the segment terminal on cell which has highest confidenceScore becomes winner.
+        self.winner              = True                       # Only the segment terminal on cell which has highest confidenceScore becomes winner.
 
         self.markedForDeletion   = False
 
@@ -38,13 +38,47 @@ class Segment:
             self.terminalPermanences.append( uniform( 0, vectorMemoryDict[ "initialPermanence" ] ) )
 
         # Vector portion.
-        self.vectorSynapses = vectorSDR.copy()
+        self.vectorSynapses  = vectorSDR.copy()
+        self.vectorPermanences = []
+        for iCell in vectorSDR:
+            self.vectorPermanences.append( uniform( 0, vectorMemoryDict[ "initialPermanence" ] ) )
+        self.vectorThreshold = vectorMemoryDict[ "FActivationThresholdMin" ]   # Minimum overlap required to activate segment.
+
+        # Position portion.
+        self.positionSynapses  = positionSDR.copy()
+        self.positionPermanences = []
+        for iCell in positionSDR:
+            self.positionPermanences.append( uniform( 0, vectorMemoryDict[ "initialPermanence" ] ) )
+        self.positionThreshold = vectorMemoryDict[ "FActivationThresholdMin" ]   # Minimum overlap required to activate segment.
 
     def Inside( self, vectorSDR ):
-    # Checks if given vector position is inside range of number of standard deviations allowed.
+    # Checks if given vector position fits with this segment.
 
-        # Calculate vector probability that we are inside.
+        # Compute the overlap with the segments synapses.
         intersection = FastIntersect( vectorSDR, self.vectorSynapses )
+
+        if len( intersection ) >= self.vectorThreshold:
+            return True
+        else:
+            return False
+
+# CAN MAKE BOTH ABOVE AND BELOW ONE FUNCTION, WITH MULTIPLE ALLOWABLE SECONDARY INPUT STREAMS (MAYBE EVEN PRIMARY TOO)
+
+    def CheckPosition( self, positionSDR ):
+    # Checks if given position fits with this segment
+
+        # Compute the overlap with the segments synapses.
+        intersection = FastIntersect( positionSDR, self.positionSynapses )
+
+        if len( intersection ) >= self.positionThreshold:
+            return True
+        else:
+            return False
+
+    def CheckTerminalActivation( self, activeTerminalColumns ):
+    # Check the overlap of terminal columns and activeTerminalColumns.
+
+        intersection = FastIntersect( self.terminalColumns, activeTerminalColumns )
 
         if len( intersection ) >= self.activationThreshold:
             return True
@@ -59,60 +93,6 @@ class Segment:
         if index != None:
             if self.incidentPermanences[ index ] >= self.vectorMemoryDict[ "permanenceLowerThreshold" ]:
                 NoRepeatInsort( self.incidentActivation, incidentColumn )
-
-    def IncreaseTerminalPermanence( self, FCells, terCell ):
-    # Increases the permanence of indexed terminal cell.
-
-        terIndex = IndexIfItsIn( self.terminalSynapses, terCell )
-
-        self.terminalPermanences[ terIndex ] += self.vectorMemoryDict[ "permanenceIncrement" ]
-
-        if self.terminalPermanences[ terIndex ] >= 1.0:
-            self.terminalPermanences[ terIndex ] = 1.0
-
-    def DecreaseTerminalPermanence( self, FCells, terCell ):
-    # Decreases permanence of indexed terminal cell.
-
-        terIndex = IndexIfItsIn( self.terminalSynapses, terCell )
-
-        self.terminalPermanences[ terIndex ] -= self.vectorMemoryDict[ "permanenceDecrement" ]
-
-        if self.terminalPermanences[ terIndex ] <= 0.0:
-            # If it is below 0.0 then delete it.
-            self.RemoveTerminalSynapse( FCells, terCell )
-
-    def DecayTerminalPermanence( self, FCells, terCell ):
-    # Decreases permanence of indexed terminal cell.
-
-        terIndex = IndexIfItsIn( self.terminalSynapses, terCell )
-
-# MAYBE JUST BETTER TO USE ModifyAllSynapses FUNCTION FOR ALL THESE, AND THEN WE CAN DECAY DIFFERENT AMOUNT FOR ACTIVE BUT NOT WINNER, AND NON ACTIVE SEGS.
-        self.terminalPermanences[ terIndex ] -= self.vectorMemoryDict[ "permanenceDecay" ]
-
-        if self.terminalPermanences[ terIndex ] <= 0.0:
-            # If it is below 0.0 then delete it.
-            self.RemoveTerminalSynapse( FCells, terCell )
-
-    def IncreaseIncidentPermanence( self, FCells, incCell ):
-    # Increase permanence to indexed incident cell.
-
-        incIndex = IndexIfItsIn( self.incidentSynapses, incCell )
-
-        self.incidentPermanences[ incIndex ] += self.vectorMemoryDict[ "permanenceIncrement" ]
-
-        if self.incidentPermanences[ incIndex ] >= 1.0:
-            self.incidentPermanences[ incIndex ] = 1.0
-
-    def DecreaseIncidentPermanence( self, FCells, incCell ):
-    # Decreases permanence of indexed incident cell.
-
-        incIndex = IndexIfItsIn( self.incidentSynapses, incCell )
-
-        self.incidentPermanences[ incIndex ] -= self.vectorMemoryDict[ "permanenceDecrement" ]
-
-        if self.incidentPermanences[ incIndex ] <= 0.0:
-            # If it is below 0.0 then delete it.
-            self.RemoveIncidentSynapse( FCells, incCell )
 
     def RemoveTerminalSynapse( self, FCells, cellToDelete ):
     # Delete the terminal synapse sent.
@@ -178,92 +158,211 @@ class Segment:
             print( "NewIncidentSynapse(): Tried to add an incident synapse, but synapse to this column already exists." )
             exit()
 
-    def ModifyAllSynapses( self, FCells, active, lastActive ):
+    def ModifyTransformSynapses( self, vectorLastActive ):
+    # 1.) Increase permanence strength to last-active incident cells that already have synapses;
+    # 2.) Decrease synapse strength to inactive incident cells that already have synapses;
+    # 3.) Build new synapses to active incident winner cells that don't have synapses;
+
+        incSynapseToAdd = vectorLastActive.copy()                      # Used for 3 below.
+
+        for incCell in self.vectorSynapses:
+            # 1.)...
+            incIndex = IndexIfItsIn( self.vectorSynapses, incCell )
+
+            if BinarySearch( vectorLastActive, incCell ):
+                self.vectorPermanences[ incIndex ] = ModThisSynapse( self.vectorPermanences[ incIndex ], self.vectorMemoryDict[ "permanenceIncrement" ], 0.0, 1.0 )
+                DelIfIn( incSynapseToAdd, incCell )
+            # 2.)...
+            else:
+                self.vectorPermanences[ incIndex ] = ModThisSynapse( self.vectorPermanences[ incIndex ], -self.vectorMemoryDict[ "permanenceDecrement" ], 0.0, 1.0 )
+                # If it is below 0.0 then delete it.
+                if self.vectorPermanences[ incIndex ] <= 0.0:
+                    del self.vectorSynapses[ incIndex ]
+                    del self.vectorPermanences[ incIndex ]
+
+                    if len( self.vectorSynapses ) <= self.vectorMemoryDict[ "FActivationThresholdMin" ]:
+                        self.markedForDeletion = True
+        # 3.)...
+        if len( incSynapseToAdd ) > 0:
+            # Choose which synapses to actually add, since we can only add n-number per time step.
+            reallyRealSynapsesToAdd = sample( incSynapseToAdd, min( len( incSynapseToAdd ), self.vectorMemoryDict[ "maxSynapsesToAddPer" ] ) )
+            for toAdd in reallyRealSynapsesToAdd:
+                synLengthBefore = len( self.vectorSynapses )
+
+                indexToPut = NoRepeatInsort( self.vectorSynapses, toAdd )
+                self.vectorPermanences.insert( indexToPut, uniform( 0, self.vectorMemoryDict[ "initialPermanence" ] ) )
+
+                if len( self.vectorSynapses ) == synLengthBefore:
+                    print( "ModifyTransformSynapses(): Tried to add an incident synapse, but already exists." )
+                    exit()
+
+            # If the number of synapses is above maxSynapsesPerSegment then delete random synapses.
+# PROBABLY BETTER TO REMOVE THE ONE WITH THE LOWEST PERMANENCE, THIS SHOULDNT BE HARD TO DO EITHER AS THERE IS A FUNCTION TO DO THIS.
+            while self.vectorMemoryDict[ "maxSynapsesPerSegment" ] - len( self.vectorSynapses ) < 0:
+                toDelIndex = randrange( len( self.vectorSynapses ) )
+                del self.vectorSynapses[ toDelIndex ]
+                del self.vectorPermanences[ toDelIndex ]
+
+                if len( self.vectorSynapses ) <= self.vectorMemoryDict[ "FActivationThresholdMin" ]:
+                    self.markedForDeletion = True
+
+    def ModifyPositionSynapses( self, positionLastActive ):
+    # 1.) Increase permanence strength to last-active incident cells that already have synapses;
+    # 2.) Decrease synapse strength to inactive incident cells that already have synapses;
+    # 3.) Build new synapses to active incident winner cells that don't have synapses;
+
+        incSynapseToAdd = positionLastActive.copy()                      # Used for 3 below.
+
+        print(incSynapseToAdd)
+
+        for incCell in self.positionSynapses:
+            # 1.)...
+            incIndex = IndexIfItsIn( self.positionSynapses, incCell )
+
+            if BinarySearch( positionLastActive, incCell ):
+                self.positionPermanences[ incIndex ] = ModThisSynapse( self.positionPermanences[ incIndex ], self.vectorMemoryDict[ "permanenceIncrement" ], 0.0, 1.0 )
+                DelIfIn( incSynapseToAdd, incCell )
+            # 2.)...
+            else:
+                self.positionPermanences[ incIndex ] = ModThisSynapse( self.positionPermanences[ incIndex ], -self.vectorMemoryDict[ "permanenceDecrement" ], 0.0, 1.0 )
+                # If it is below 0.0 then delete it.
+                if self.positionPermanences[ incIndex ] <= 0.0:
+                    del self.positionSynapses[ incIndex ]
+                    del self.positionPermanences[ incIndex ]
+
+                    if len( self.positionSynapses ) <= self.vectorMemoryDict[ "FActivationThresholdMin" ]:
+                        self.markedForDeletion = True
+        # 3.)...
+        if len( incSynapseToAdd ) > 0:
+            print(incSynapseToAdd)
+
+            # Choose which synapses to actually add, since we can only add n-number per time step.
+            reallyRealSynapsesToAdd = sample( incSynapseToAdd, min( len( incSynapseToAdd ), self.vectorMemoryDict[ "maxSynapsesToAddPer" ] ) )
+            for toAdd in reallyRealSynapsesToAdd:
+                synLengthBefore = len( self.positionSynapses )
+
+                print( self.positionSynapses)
+                print(toAdd)
+
+                indexToPut = NoRepeatInsort( self.positionSynapses, toAdd )
+                self.positionPermanences.insert( indexToPut, uniform( 0, self.vectorMemoryDict[ "initialPermanence" ] ) )
+
+                if len( self.positionSynapses ) == synLengthBefore:
+                    print( "ModifyPositionSynapses(): Tried to add an incident synapse, but already exists." )
+                    exit()
+
+            # If the number of synapses is above maxSynapsesPerSegment then delete random synapses.
+# PROBABLY BETTER TO REMOVE THE ONE WITH THE LOWEST PERMANENCE, THIS SHOULDNT BE HARD TO DO EITHER AS THERE IS A FUNCTION TO DO THIS.
+            while self.vectorMemoryDict[ "maxSynapsesPerSegment" ] - len( self.positionSynapses ) < 0:
+                toDelIndex = randrange( len( self.positionSynapses ) )
+                del self.positionSynapses[ toDelIndex ]
+                del self.positionPermanences[ toDelIndex ]
+
+                if len( self.positionSynapses ) <= self.vectorMemoryDict[ "FActivationThresholdMin" ]:
+                    self.markedForDeletion = True
+
+    def ModifyAllPrimaryIncidentSynapses( self, FCells, lastActive ):
+    # 1.) Increase permanence strength to last-active incident cells that already have synapses;
+    # 2.) Decrease synapse strength to inactive incident cells that already have synapses;
+    # 3.) Build new synapses to active incident winner cells that don't have synapses;
+
+        incSynapseToAdd = lastActive.copy()                      # Used for 3 below.
+
+        for incCell in self.incidentSynapses:
+            # 1.)...
+            incIndex = IndexIfItsIn( self.incidentSynapses, incCell )
+
+            if FCells[ incCell ].lastActive:
+                self.incidentPermanences[ incIndex ] = ModThisSynapse( self.incidentPermanences[ incIndex ], self.vectorMemoryDict[ "permanenceIncrement" ], 0.0, 1.0 )
+                DelIfIn( incSynapseToAdd, incCell )
+            # 2.)...
+            else:
+                self.incidentPermanences[ incIndex ] = ModThisSynapse( self.incidentPermanences[ incIndex ], -self.vectorMemoryDict[ "permanenceDecrement" ], 0.0, 1.0 )
+                # If it is below 0.0 then delete it.
+                if self.incidentPermanences[ incIndex ] <= 0.0:
+                    self.RemoveIncidentSynapse( FCells, incCell )
+
+        # 3.)...
+        if len( incSynapseToAdd ) > 0:
+            # Check to make sure this segment doesn't already have a synapse to this column.
+            realSynapsesToAdd = []
+
+            for synAdd in incSynapseToAdd:
+                if FCells[ synAdd ].lastWinner and not BinarySearch( self.incidentColumns, FCells[ synAdd ].column ):
+                    realSynapsesToAdd.append( synAdd )
+
+            # Choose which synapses to actually add, since we can only add n-number per time step.
+            reallyRealSynapsesToAdd = sample( realSynapsesToAdd, min( len( realSynapsesToAdd ), self.vectorMemoryDict[ "maxSynapsesToAddPer" ] ) )
+            for toAdd in reallyRealSynapsesToAdd:
+                self.NewIncidentSynapse( FCells, toAdd )
+
+            # If the number of synapses is above maxSynapsesPerSegment then delete random synapses.
+# PROBABLY BETTER TO REMOVE THE ONE WITH THE LOWEST PERMANENCE, THIS SHOULDNT BE HARD TO DO EITHER AS THERE IS A FUNCTION TO DO THIS.
+            while self.vectorMemoryDict[ "maxSynapsesPerSegment" ] - len( self.incidentSynapses ) < 0:
+                toDelIndex = randrange( len( self.incidentSynapses ) )
+                self.RemoveIncidentSynapse( FCells, self.incidentSynapses[ toDelIndex ] )
+
+    def ModifyAllTerminalSynapses( self, FCells, active ):
     # 1.) Decrease all terminal permanences to currently non-winner cells.
     # 2.) If terminal cell is winner increase permance for this terminal synapse;
-    # 3.) Increase permanence strength to last-active incident cells that already have synapses;
-    # 4.) Decrease synapse strength to inactive incident cells that already have synapses;
-    # 5.) Build new synapses to active incident winner cells that don't have synapses;
-    # 6.) Build new synapses to active terminal winner cells that don't have synapses;
+    # 3.) Build new synapses to active terminal winner cells that don't have synapses;
+
+        terSynapseToAdd = active.copy()                          # Used for 6 below.
+
+        # 1.)...
+        for terCell in self.terminalSynapses:
+            terIndex = IndexIfItsIn( self.terminalSynapses, terCell )
+
+            if not FCells[ terCell ].active:
+                self.terminalPermanences[ terIndex ] = ModThisSynapse( self.terminalPermanences[ terIndex ], -self.vectorMemoryDict[ "permanenceDecrement" ], 0.0, 1.0 )
+                if self.terminalPermanences[ terIndex ] <= 0.0:
+                    # If it is below 0.0 then delete it.
+                    self.RemoveTerminalSynapse( FCells, terCell )
+        # 2.)...
+            else:
+                self.terminalPermanences[ terIndex ] = ModThisSynapse( self.terminalPermanences[ terIndex ], self.vectorMemoryDict[ "permanenceIncrement" ], 0.0, 1.0 )
+
+            if FCells[ terCell ].active:
+                DelIfIn( terSynapseToAdd, terCell )
+
+        # 3.)...
+        if len( terSynapseToAdd ) > 0:
+            # Check to make sure this segment doesn't already have a synapse to this column.
+            realSynapsesToAdd = []
+
+            for synAdd in terSynapseToAdd:
+                if FCells[ synAdd ].winner and not BinarySearch( self.terminalColumns, FCells[ synAdd ].column ):
+                    realSynapsesToAdd.append( synAdd )
+
+            # Choose which synapses to actually add, since we can only add n-number per time step.
+            reallyRealSynapsesToAdd = sample( realSynapsesToAdd, min( len( realSynapsesToAdd ), self.vectorMemoryDict[ "maxSynapsesToAddPer" ] ) )
+            for toAdd in reallyRealSynapsesToAdd:
+                self.NewTerminalSynapse( FCells, toAdd )
+
+            # If the number of synapses is above maxSynapsesPerSegment then delete random synapses.
+# PROBABLY BETTER TO REMOVE THE ONE WITH THE LOWEST PERMANENCE, THIS SHOULDNT BE HARD TO DO EITHER AS THERE IS A FUNCTION TO DO THIS.
+            while self.vectorMemoryDict[ "maxSynapsesPerSegment" ] - len( self.incidentSynapses ) < 0:
+                toDelIndex = randrange( len( self.terminalSynapses ) )
+                self.RemoveTerminalSynapse( FCells, self.incidentSynapses[ toDelIndex ] )
+
+    def SynapseLearning( self, FCells, active, lastActive, vectorLastActive, positionLastActive ):
+    # Perform learning on all synapses based on cell and column activations.
 
         if self.winner:
-            incSynapseToAdd = lastActive.copy()                          # Used for 5 below.
-            terSynapseToAdd = active.copy()                          # Used for 6 below.
-
-            # 1.)...
-            for terCell in self.terminalSynapses:
-                if not FCells[ terCell ].winner:
-                    self.DecreaseTerminalPermanence( FCells, terCell )
-            # 2.)...
-                else:
-                    self.IncreaseTerminalPermanence( FCells, terCell )
-
-                if FCells[ terCell ].active:
-                    del terSynapseToAdd[ IndexIfItsIn( terSynapseToAdd, terCell ) ]
-
-            for incCell in self.incidentSynapses:
-                # 3.)...
-                if FCells[ incCell ].lastActive:
-                    self.IncreaseIncidentPermanence( FCells, incCell )
-                    del incSynapseToAdd[ IndexIfItsIn( incSynapseToAdd, incCell ) ]
-                # 4.)...
-                elif not FCells[ incCell ].lastActive:
-                    self.DecreaseIncidentPermanence( FCells, incCell )
-
-            # 5.)...
-            if len( incSynapseToAdd ) > 0:
-                # Check to make sure this segment doesn't already have a synapse to this column.
-                realSynapsesToAdd = []
-
-                for synAdd in incSynapseToAdd:
-                    if FCells[ synAdd ].lastWinner and not BinarySearch( self.incidentColumns, FCells[ synAdd ].column ):
-                        realSynapsesToAdd.append( synAdd )
-
-                # Choose which synapses to actually add, since we can only add n-number per time step.
-                reallyRealSynapsesToAdd = sample( realSynapsesToAdd, min( len( realSynapsesToAdd ), self.vectorMemoryDict[ "maxSynapsesToAddPer" ] ) )
-                for toAdd in reallyRealSynapsesToAdd:
-                    self.NewIncidentSynapse( FCells, toAdd )
-
-                # If the number of synapses is above maxSynapsesPerSegment then delete random synapses.
-# PROBABLY BETTER TO REMOVE THE ONE WITH THE LOWEST PERMANENCE, THIS SHOULDNT BE HARD TO DO EITHER AS THERE IS A FUNCTION TO DO THIS.
-                while self.vectorMemoryDict[ "maxSynapsesPerSegment" ] - len( self.incidentSynapses ) < 0:
-                    toDelIndex = randrange( len( self.incidentSynapses ) )
-                    self.RemoveIncidentSynapse( FCells, self.incidentSynapses[ toDelIndex ] )
-
-            # 6.)...
-            if len( terSynapseToAdd ) > 0:
-                # Check to make sure this segment doesn't already have a synapse to this column.
-                realSynapsesToAdd = []
-
-                for synAdd in terSynapseToAdd:
-                    if FCells[ synAdd ].winner and not BinarySearch( self.terminalColumns, FCells[ synAdd ].column ):
-                        realSynapsesToAdd.append( synAdd )
-
-                # Choose which synapses to actually add, since we can only add n-number per time step.
-                reallyRealSynapsesToAdd = sample( realSynapsesToAdd, min( len( realSynapsesToAdd ), self.vectorMemoryDict[ "maxSynapsesToAddPer" ] ) )
-                for toAdd in reallyRealSynapsesToAdd:
-                    self.NewTerminalSynapse( FCells, toAdd )
-
-                # If the number of synapses is above maxSynapsesPerSegment then delete random synapses.
-# PROBABLY BETTER TO REMOVE THE ONE WITH THE LOWEST PERMANENCE, THIS SHOULDNT BE HARD TO DO EITHER AS THERE IS A FUNCTION TO DO THIS.
-                while self.vectorMemoryDict[ "maxSynapsesPerSegment" ] - len( self.incidentSynapses ) < 0:
-                    toDelIndex = randrange( len( self.terminalSynapses ) )
-                    self.RemoveTerminnalSynapse( FCells, self.incidentSynapses[ toDelIndex ] )
-
-        # Decay terminal synapses if it is active but not winner.
-        elif self.active:
-            if not self.IsConfident():
-                for terCell in self.terminalSynapses:
-                    self.DecayTerminalPermanence( FCells, terCell )
-
-        # Also Decay terminal synapses if it is not active but the terminal cell is active.
+            self.ModifyAllPrimaryIncidentSynapses( FCells, lastActive )
+            self.ModifyTransformSynapses( vectorLastActive )
+            self.ModifyPositionSynapses( positionLastActive )
+            self.ModifyAllTerminalSynapses( FCells, active )
+            self.UpdateConfidenceScore()
         else:
-            if not self.IsConfident():
-                for terCell in self.terminalSynapses:
-                    self.DecayTerminalPermanence( FCells, terCell )
-
-        # Update segments confidence score.
-        self.UpdateConfidenceScore()
+        # Also Decay terminal synapses if it is not active but the terminal cell is active.
+#            if not self.IsConfident():
+            for terCell in self.terminalSynapses:
+                terIndex = IndexIfItsIn( self.terminalSynapses, terCell )
+                self.terminalPermanences[ terIndex ] = ModThisSynapse( self.terminalPermanences[ terIndex ], -self.vectorMemoryDict[ "permanenceDecay" ], 0.0, 1.0 )
+                # If it is below 0.0 then delete it.
+                if self.terminalPermanences[ terIndex ] <= 0.0:
+                    self.RemoveTerminalSynapse( FCells, terCell )
 
     def IsConfident( self ):
     # Checks if this segments confidence score is above threshold.
@@ -287,13 +386,11 @@ class Segment:
         # Calculate the incident activation threshold given above score.
         self.activationThreshold = int( score * ( self.vectorMemoryDict[ "FActivationThresholdMax" ] - self.vectorMemoryDict[ "FActivationThresholdMin" ] ) + self.vectorMemoryDict[ "FActivationThresholdMin" ] )
 
-    def CheckActivation( self, vectorSDR ):
+    def CheckIncidentActivation( self ):
     # Checks the incidentActivation against activationThreshold to see if segment becomes active and stimulated.
 
-        if len( self.incidentActivation ) >= self.activationThreshold and self.Inside( vectorSDR ):
+        if len( self.incidentActivation ) >= self.activationThreshold:
             self.active            = True
-            self.timeSinceActive   = 0
-
             return True
 
         self.active = False
@@ -307,12 +404,17 @@ class Segment:
     def GetTerminalSynapses( self ):
     # Return the terminal synapses and their permanence strengths.
 
-        return self.terminalSynapses.copy(), self.terminalPermanences.copy()
+        return self.terminalSynapses.copy(), self.terminalPermanences.copy(), self.terminalColumns.copy()
 
     def GetIncidentSynapses( self ):
     # Return the terminal synapses and their permanence strengths.
 
         return self.incidentSynapses.copy(), self.incidentPermanences.copy()
+
+    def ReturnTransformSDR( self ):
+    # Returns the transformation SDR.
+
+        return self.vectorSynapses.copy()
 
     def ReturnTerminalActivation( self ):
     # Returns the sum of terminal permanences.
@@ -381,10 +483,10 @@ class SegmentStructure:
 
         if self.segments[ segIndex ] != None:
             # Delete any references to segment in FCells.
-            incidentCells, incidentPermanences = self.segments[ segIndex ].GetIncidentSynapses()
+            incidentCells = self.segments[ segIndex ].GetIncidentSynapses()[ 0 ]
             for iCell in incidentCells:
                 FCells[ iCell ].DeleteIncidentSegmentReference( segIndex )
-            terminalCells, terminalPermanences = self.segments[ segIndex ].GetTerminalSynapses()
+            terminalCells = self.segments[ segIndex ].GetTerminalSynapses()[ 0 ]
             for tCell in terminalCells:
                 FCells[ tCell ].DeleteTerminalSegmentReference( segIndex )
 
@@ -397,7 +499,7 @@ class SegmentStructure:
             # Delete the segment by setting the entry to None state.
             self.segments[ segIndex ] = None
 
-    def CreateSegment( self, FCells, incidentColumns, terminalColumns, incidentCells, terminalCells, vectorSDR ):
+    def CreateSegment( self, FCells, incidentColumns, terminalColumns, incidentCells, terminalCells, vectorSDR, positionSDR ):
     # Creates a new segment.
 
         # If no segments available then randomly delete one below confidene threshold.
@@ -412,15 +514,16 @@ class SegmentStructure:
         indexOfNew = self.availableSegments.pop( 0 )
 
         # Assemble and generate the new segment, and add it to list.
-        newSegment = Segment( self.vectorMemoryDict, incidentColumns, terminalColumns, incidentCells, terminalCells, vectorSDR, indexOfNew )
+        newSegment = Segment( self.vectorMemoryDict, indexOfNew, incidentColumns, terminalColumns, incidentCells, terminalCells, vectorSDR, positionSDR )
         if self.segments[ indexOfNew ] == None:
             self.segments[ indexOfNew ] = newSegment
         else:
             print( "CreateSegment(): Tried to create new segment but this entry was already full." )
             exit()
 
-        # Add segment to active segments list.
+        # Add segment to active segments list and winners list.
         NoRepeatInsort( self.activeSegments, indexOfNew )
+        NoRepeatInsort( self.winnerSegments, indexOfNew )
 
         # Add reference to segment in incident cells.
         for incCell in incidentCells:
@@ -454,9 +557,6 @@ class SegmentStructure:
             if self.segments[ actSeg ].RefreshSegment():
                 toDelete.append( actSeg )
 
-        for fCell in FCells:
-            fCell.RefreshTerminalActivation()
-
         # Delete segments with no terminal or incident synapses.
         for delSeg in toDelete:
             self.DeleteSegmentsAndSynapse( FCells, delSeg )
@@ -464,95 +564,113 @@ class SegmentStructure:
         self.activeSegments = []
         self.winnerSegments = []
 
-    def SegmentLearning( self, FCells, activeFCells, lastActiveFCells ):
+    def SegmentLearning( self, FCells, activeFCells, lastActiveFCells, lastVectorSDR, lastPositionSDR ):
     # Perform learning on all active and inactive segments.
     # Refresh all segments then perform learning on them.
     # Delete segments that need deleting.
 
-        toModSegs = []
+        for actSeg in self.activeSegments:
+            self.segments[ actSeg ].SynapseLearning( FCells, lastActiveFCells, activeFCells, lastVectorSDR, lastPositionSDR )
 
-# MAYBE NOT NECCESSARY?
-        # For all active segments, use the active incident cells and winner cells to modify synapses.
-        for actCell in activeFCells:
-            for segIndex in FCells[ actCell ].ReturnTerminalOn():
-                NoRepeatInsort( toModSegs, segIndex )
+    def ChooseVectorSegment( self ):
+    # Go through all active stimulated segments and check their transformationSDRs.
+    # Form a transformSDR from the most confident segments which fits.
+    # Returns the vector of appropriate size from the average of all winner segments, and the predicted cells.
 
-        for segment in toModSegs:
-            self.segments[ segment ].ModifyAllSynapses( FCells, activeFCells, lastActiveFCells )
+# WE WILL USE THE FACT THAT SEGMENTS BRANCH TERMINAL CELLS TO SIMPLIFY, BUT LATER SHOULD EXTEND THIS TO MORE GENERAL IF NOT BRANCHING.
+        # Find the active segment with the highest confidence.
+        index = IndexOfGreatest( [ self.segments[ i ].ReturnConfidenceScore() for i in self.activeSegments ] )
 
-#        for segment in self.segments:
-#            if segment != None:
-#                segment.ModifyAllSynapses( FCells, lastActiveFCells )
+        if len( self.activeSegments ) > 0 and self.segments[ self.activeSegments[ index ] ].IsConfident():
+            # If the greatest confidence segment is above threshold confidence then return its terminal cells and its vector.
+            terminalSynapses = self.segments[ self.activeSegments[ index ] ].GetTerminalSynapses() [ 0 ]
+            vectorSDR        = self.segments[ self.activeSegments[ index ] ].ReturnTransformSDR()
 
-    def SegmentsAreConfident( self ):
-    # Check the winner segments if they are confident, and return True if they all are.
+            return terminalSynapses, vectorSDR
 
-# MIGHT WANT TO CHANGE THIS TO AN ABOVE THRESHOLD NUMBER OF WINNING SEGMENTS ARE CONFIDENT, SINCE I MIGHT RETURN TO WINNING SEGMENTS FOR EACH TERMINAL CELL.
-        for winSeg in self.winnerSegments:
-            if not self.segments[ winSeg ].IsConfident():
-                return False
+        else:
+            return [], []
 
-        return True
+    def ChooseWinnerSegment( self, activeColumns, lastVectorSDR, lastPositionSDR ):
+    # Use the active segments from last time step, plus the last motor vectorSDR, plus the presently active columns, to choose a winner segment(s).
 
-    def GetVector( self ):
-    # returns the vector of appropriate size from the average of all winner segments.
+        validSegments = []
 
-        toReturn = []
-        
+        # Check the active segments terminal against activeColumns for overlap.
+        for actSeg in self.activeSegments:
+            if self.segments[ actSeg ].CheckTerminalActivation( activeColumns ) and self.segments[ actSeg ].Inside( lastVectorSDR ) and self.segments[ actSeg ].CheckPosition( lastPositionSDR ):
+                validSegments.append( actSeg )
 
-    def StimulateSegments( self, FCells, activeCells, vectorSDR ):
+        # Choose the valid segment with the greatest confidence, even if not above threshold confidence. If there are no valid segments return None.
+        winIndex = IndexOfGreatest( [ self.segments[ i ].ReturnConfidenceScore() for i in validSegments ] )
+
+        if winIndex != None:
+            # Make this segment the winner.
+            self.segments[ validSegments[ winIndex ] ].SetAsWinner()
+            NoRepeatInsort( self.winnerSegments, validSegments[ winIndex ] )
+            return True
+
+        else:
+            return False
+
+#                # Add to the terminal stimulation of the terminal cell.
+#                terminalCells, terminalPermanences = segment.GetTerminalSynapses()
+#                for index in range( len( terminalCells ) ):
+#                    # Terminal cell becomes predictive.
+#                    insertIndex = NoRepeatInsort( predictedCells, terminalCells[ index ] )
+#
+#                    # Add the segments for use in choosing the winner segment for each predicted cell.
+#                    if len( predictedCells ) == len( segsForTCells ):
+#                        NoRepeatInsort( segsForTCells[ insertIndex ], segment.ID )
+#                    else:
+#                        segsForTCells.insert( insertIndex, [ segment.ID ] )
+#
+#                    # Add strimulation to the cell.
+#                    FCells[ terminalCells[ index ] ].AddTerminalStimulation( terminalPermanences[ index ] )
+#
+#        # Choose the winner segment for each terminal cell.
+#        for entry in segsForTCells:
+#            highestConfidenceSeg   = entry[ 0 ]
+#            highestConfidenceValue = self.segments[ entry[ 0 ] ].ReturnConfidenceScore()
+#
+#            for segIdx in entry:
+#                if self.segments[ segIdx ].ReturnConfidenceScore() > highestConfidenceValue:
+#                    highestConfidenceSeg   = segIdx
+#                    highestConfidenceValue = self.segments[ segIdx ].ReturnConfidenceScore()
+#
+#            # Set this segment as the winner.
+#            self.segments[ highestConfidenceSeg ].SetAsWinner()
+#            NoRepeatInsort( self.winnerSegments, highestConfidenceSeg )
+#
+#        return predictedCells
+
+    def StimulateSegments( self, FCells, activeCells ):
     # Using the activeCells and next vector find all segments that activate from this.
     # Use these active segments to get the predicted cells for given column.
 
-        predictedCells = []             # All the cells terminal on segments which become active due to vectorSDR and active incident cells.
-        segsForTCells  = []             # The segs which are terminal on the predictedCells.
-        potentialSegs  = []             # The segments that are stimulated and at zero vector.
-
         # First stimulate and activate any segments from the incident cells.
         # Activate the synapses in segments using activeCells.
-        startTime = time()
         for incCell in activeCells:
             incCol, incSegments = FCells[ incCell ].ReturnIncidentOn()
             for entry in incSegments:
                 self.segments[ entry ].IncidentCellActive( incCell, incCol )
-        print( "   Incident Activation: " + str( time() - startTime ) )
 
         # Check the overlap of all segments and see which ones are active, and add the terminalCell to stimulatedCells.
-        startTime = time()
         for segment in self.segments:
-            if segment != None and segment.CheckActivation( vectorSDR ):                   # Checks incident overlap above threshold and if vector is inside.
+            if segment != None and segment.CheckIncidentActivation():                   # Checks incident overlap above threshold and if vector is inside.
                 NoRepeatInsort( self.activeSegments, segment.ID )
 
-                # Add to the terminal stimulation of the terminal cell.
-                terminalCells, terminalPermanences = segment.GetTerminalSynapses()
-                for index in range( len( terminalCells ) ):
-                    # Terminal cell becomes predictive.
-                    insertIndex = NoRepeatInsort( predictedCells, terminalCells[ index ] )
+    def ReturnWinnerCells( self ):
+    # Return the cells of the winner segments.
 
-                    # Add the segments for use in choosing the winner segment for each predicted cell.
-                    if len( predictedCells ) == len( segsForTCells ):
-                        NoRepeatInsort( segsForTCells[ insertIndex ], segment.ID )
-                    else:
-                        segsForTCells.insert( insertIndex, [ segment.ID ] )
+        winnerCells = []
+        winnerCols  = []
 
-                    # Add strimulation to the cell.
-                    FCells[ terminalCells[ index ] ].AddTerminalStimulation( terminalPermanences[ index ] )
-        print( "   Check and Activate Segments: " + str( time() - startTime ) )
+        for winSeg in self.winnerSegments:
+            winnerCells = NoRepeatConcatenate( winnerCells, self.segments[ winSeg ].GetTerminalSynapses()[ 0 ] )
+            winnerCols  = NoRepeatConcatenate( winnerCols, self.segments[ winSeg ].GetTerminalSynapses()[ 2 ] )
 
-        # Choose the winner segment for each terminal cell.
-        startTime = time()
-        for entry in segsForTCells:
-            highestConfidenceSeg   = entry[ 0 ]
-            highestConfidenceValue = self.segments[ entry[ 0 ] ].ReturnConfidenceScore()
+# DONT NEED TO CHECK IF ANY OF THE WINNER CELLS CHOSEN ARE OF THE SAME COLUMN NOW, BECAUSE WE SHOULD ONLY HAVE ONE WINNER SEGMENT, BUT IF WE HAVE
+# NOT BRANCHING TERMINAL THEN WE WILL NEED TO CHECK THIS.
 
-            for segIdx in entry:
-                if self.segments[ segIdx ].ReturnConfidenceScore() > highestConfidenceValue:
-                    highestConfidenceSeg   = segIdx
-                    highestConfidenceValue = self.segments[ segIdx ].ReturnConfidenceScore()
-
-            # Set this segment as the winner.
-            self.segments[ highestConfidenceSeg ].SetAsWinner()
-            NoRepeatInsort( self.winnerSegments, highestConfidenceSeg )
-        print( "   Choose Winner Segment for each column: " + str( time() - startTime ) )
-
-        return predictedCells
+        return winnerCells, winnerCols

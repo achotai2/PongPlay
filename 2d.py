@@ -22,15 +22,16 @@ startTheClock = maxClockTime
 # Set up sense organ.
 senseResX = 20
 senseResY = 20
-sensePosX = 0
-sensePosY = 0
+sensePos = []
+sensePos.append( 0 )
+sensePos.append( 0 )
 senseOrgan = turtle.Turtle( )
 senseOrgan.speed( 0 )
 senseOrgan.shape( "square" )
 senseOrgan.color( "white" )
 senseOrgan.shapesize( stretch_wid = senseResX / 10, stretch_len = senseResY / 10 )
 senseOrgan.penup()
-senseOrgan.goto( sensePosX, sensePosY )
+senseOrgan.goto( sensePos[ 0 ], sensePos[ 1 ] )
 
 # Set up objects......
 objWidth   = 10
@@ -41,6 +42,7 @@ objectList = []
 objColour  = 2
 objCenterX = 0
 objCenterY = 0
+agentVector = [ 0, 0, 0, 0 ]
 objectList.append( [ objCenterX, objCenterY, objWidth, objHeight, objColour ] )
 agentDraw = turtle.Turtle( )
 agentDraw.speed( 0 )
@@ -88,22 +90,67 @@ def UpdateObjectDraw():
     enemyDraw.setx( objectList[ 1 ][ 0 ] )
     enemyDraw.sety( objectList[ 1 ][ 1 ] )
 
+    senseOrgan.goto( sensePos[ 0 ], sensePos[ 1 ] )
+
 def MoveEnemy():
 # Move the enemy towards the player.
 
+    enemyMoveAmount = 10
+
     if objectList[ 0 ][ 0 ] > objectList[ 1 ][ 0 ]:
-        objectList[ 1 ][ 0 ] += 10
+        objectList[ 1 ][ 0 ] += enemyMoveAmount
     elif objectList[ 0 ][ 0 ] < objectList[ 1 ][ 0 ]:
-        objectList[ 1 ][ 0 ] -= 10
+        objectList[ 1 ][ 0 ] -= enemyMoveAmount
 
     if objectList[ 0 ][ 1 ] > objectList[ 1 ][ 1 ]:
-        objectList[ 1 ][ 1 ] += 10
+        objectList[ 1 ][ 1 ] += enemyMoveAmount
     elif objectList[ 0 ][ 1 ] < objectList[ 1 ][ 1 ]:
-        objectList[ 1 ][ 1 ] -= 10
+        objectList[ 1 ][ 1 ] -= enemyMoveAmount
+
+def MoveAgent( desiredVector ):
+# Move the agent and its sense organ based on desiredVector.
+
+    agentMoveAmount = 20
+
+    prePosition = []
+    prePosition.append( objectList[ 0 ][ 0 ] )
+    prePosition.append( objectList[ 0 ][ 1 ] )
+
+    # Update the agents position.
+    if desiredVector[ 2 ] > 0:
+        objectList[ 0 ][ 0 ] += agentMoveAmount
+        if objectList[ 0 ][ 0 ] > screenWidth / 2:
+            objectList[ 0 ][ 0 ] = screenWidth / 2
+    elif desiredVector[ 2 ] < 0:
+        objectList[ 0 ][ 0 ] -= agentMoveAmount
+        if objectList[ 0 ][ 0 ] < -screenWidth / 2:
+            objectList[ 0 ][ 0 ] = -screenWidth / 2
+
+    if desiredVector[ 3 ] > 0:
+        objectList[ 0 ][ 1 ] += agentMoveAmount
+        if objectList[ 0 ][ 1 ] > screenHeight / 2:
+            objectList[ 0 ][ 1 ] = screenHeight / 2
+    elif desiredVector[ 3 ] < 0:
+        objectList[ 0 ][ 1 ] -= agentMoveAmount
+        if objectList[ 0 ][ 1 ] < -screenHeight / 2:
+            objectList[ 0 ][ 1 ] = -screenHeight / 2
+
+    # Update the sense organ positions.
+    sensePos[ 0 ] += desiredVector[ 0 ]
+    sensePos[ 1 ] += desiredVector[ 1 ]
+
+    # Calculate the agents vector.
+    newVector = []
+    newVector.append( desiredVector[ 0 ] )
+    newVector.append( desiredVector[ 1 ] )
+    newVector.append( objectList[ 0 ][ 0 ] - prePosition[ 0 ] )
+    newVector.append( objectList[ 0 ][ 1 ] - prePosition[ 1 ] )
+
+    return newVector
 
 def CheckCollision( theThing, maxThing ):
 # If enemy and player are at same position then refresh positions and send a negative signal to agent.
-# Upon a collision we feed the agent random input for maxClockTime time steps.
+# Upon a collision between agent and enemy we feed the agent random input for maxClockTime time steps.
 
     if theThing < maxThing:
         theThing += 1
@@ -123,30 +170,6 @@ def ResetObjects():
     objectList[ 1 ][ 0 ] = 100
     objectList[ 1 ][ 1 ] = 100
 
-def agent_up( ):
-    y = agentDraw.ycor()
-    if y < 290 - 20:
-        y += 20
-        agentDraw.sety( y )
-
-def agent_down( ):
-    y = agentDraw.ycor()
-    if y > -290 + 20:
-        y -= 20
-        agentDraw.sety( y )
-
-def agent_right( ):
-    x = agentDraw.xcor()
-    if x < 390 - 20:
-        x += 20
-        agentDraw.setx( x )
-
-def agent_left( ):
-    x = agentDraw.xcor()
-    if x > -390 + 20:
-        x -= 20
-        agentDraw.setx( x )
-
 def exit_handler():
 # Upon program exit collects data for Cell-Report log file, and produces the final plot.
 
@@ -155,7 +178,7 @@ def exit_handler():
 #-------------------------------------------------------------------------------
 
 # Create agent.
-agentRun = AgentRun( "Run", senseResX, senseResY, 2, 0 )
+agentRun = AgentRun( "Run", senseResX, senseResY, screenWidth, screenHeight )
 
 # Prepare log and report files.
 logFile = Logging( [ agentRun.ID ] )
@@ -173,26 +196,24 @@ while True:
     else:
         randomInput = False
 
-    UpdateObjectDraw()
-
     wn.update()         # Screen update
 
-    logFile.AddToTimeStep()
+#    logFile.AddToTimeStep()
 
     # Run agent brain and get motor vector.
-    agentVector = agentRun.Brain( objectList, sensePosX, sensePosY, 0.0, randomInput )
+    desiredVector = agentRun.Brain( objectList, sensePos[ 0 ], sensePos[ 1 ], agentVector, [ objectList[ 0 ][ 0 ], objectList[ 0 ][ 1 ] ], 0.0, randomInput )
 
     # Accumulate the active cells and segments and input into report data.
-    logFile.AccumulateReportData( [ agentRun ], [ sensePosX, sensePosY ] )
+#    logFile.AccumulateReportData( [ agentRun ], sensePos )
 
-    # Update the sense organ position.
-    sensePosX += agentVector[ 0 ]
-    sensePosY += agentVector[ 1 ]
-    senseOrgan.goto( sensePosX, sensePosY )
+    # Move the Agent.
+    agentVector = MoveAgent( desiredVector )
 
     # Move the enemy.
     if not randomInput:
         MoveEnemy()
 
+    UpdateObjectDraw()
+
     # Write segment data to individual files for report.
-    logFile.WriteDataToFiles( [ agentRun ] )
+#    logFile.WriteDataToFiles( [ agentRun ] )

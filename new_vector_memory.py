@@ -3,7 +3,7 @@ from operator import add
 from segment_struct import SegmentStructure
 from cell_struct import FCell
 from useful_functions import NoRepeatInsort, BinarySearch, ReturnMaxIndices, FastIntersect
-#import numpy as np
+from numpy import setdiff1d
 from time import time
 
 class NewVectorMemory:
@@ -30,10 +30,6 @@ class NewVectorMemory:
 
          # Stores and deals with all FCell to FCell segments.
         self.FToFSegmentStruct = SegmentStructure( vectorMemoryDict )
-
-        # Vector portion.
-        self.newVectorSDR  = []
-        self.lastVectorSDR = []
 
     def SendData( self, stateNumber ):
     # Return the active FCells as a list.
@@ -76,94 +72,103 @@ class NewVectorMemory:
             + ", # of Winner Segments: " + str( self.FToFSegmentStruct.HowManyWinnerSegs() )
             )
 
-    def ThereCanBeOnlyOne( self, activeCellsList ):
-    # Choose the winner cell for column by choosing active one with highest terminal activation.
+    def ChooseWinnerSegmentAndCells( self, lastVectorSDR, lastPositionSDR ):
+    # Use the active segments from last time step, plus the plus the last motor vectorSDR, plus the presently active columns, to choose a winner segment(s).
+    # Also choose winnerFCells.
 
-        # Find the predicted cell
-        greatestActivation = 0
-        greatestCell       = activeCellsList[ 0 ]
+        if self.FToFSegmentStruct.ChooseWinnerSegment( self.columnSDR, lastVectorSDR, lastPositionSDR ):
+            # Get the winnercells from the winner segment.
+            winnerSegmentTerminalCells, winnerSegmentTerminalCols = self.FToFSegmentStruct.ReturnWinnerCells()
 
-        if len( activeCellsList ) > 1:
-            for cell in activeCellsList:
-                if self.FCells[ cell ].GetTerminalActivation() > greatestActivation:
-                    greatestActivation = self.FCells[ cell ].GetTerminalActivation()
-                    greatestCell       = cell
+            # Get the bursting and not bursting columns from the returned winner cells from winner segment.
+            self.notBurstingCols = FastIntersect( self.columnSDR, winnerSegmentTerminalCols )
+            self.burstingCols    = setdiff1d( self.columnSDR, self.notBurstingCols, True )
 
-        return greatestCell
+            # For all the returned cells we make them winner.
+            if len( self.notBurstingCols ) > 0:
+                for i, col in enumerate( winnerSegmentTerminalCols ):
+                    if BinarySearch( self.notBurstingCols, col ):
+                        NoRepeatInsort( self.winnerFCells, winnerSegmentTerminalCells[ i ] )
+
+            # If there are active columns with no returned winner then make random cell active.
+            if len( self.burstingCols ) > 0:
+                for col in self.burstingCols:
+                    NoRepeatInsort( self.winnerFCells, randrange( col * self.vectorMemoryDict[ "cellsPerColumn" ], ( col * self.vectorMemoryDict[ "cellsPerColumn" ] ) + self.vectorMemoryDict[ "cellsPerColumn" ] ) )
+
+        else:
+            # Randomly choose winner cells for each column.
+            for col in self.columnSDR:
+                NoRepeatInsort( self.winnerFCells, randrange( col * self.vectorMemoryDict[ "cellsPerColumn" ], ( col * self.vectorMemoryDict[ "cellsPerColumn" ] ) + self.vectorMemoryDict[ "cellsPerColumn" ] ) )
+
+            # If no valid winner segment then create a new segment by randomly selecting winner terminal cells and make this segment the winner.
+            self.FToFSegmentStruct.CreateSegment( self.FCells, self.lastColumnSDR, self.columnSDR, self.lastWinnerFCells, self.winnerFCells, lastVectorSDR, lastPositionSDR )
+
+            # Make all columns bursting.
+            self.burstingCols    = self.columnSDR.copy()
+            self.notBurstingCols = []
+
+        # Make the chosen winner cells winner.
+        for winCell in self.winnerFCells:
+            self.FCells[ winCell ].SetAsWinner()
+
+        if len( self.winnerFCells ) > 40:
+            print( "ChooseWinnerSegmentAndCells(): Function generated too many winner cells (>40)." )
+            exit()
 
     def ActivateFCells( self ):
     # Uses activated columns and cells in predicted state to put cells in active states.
     # Return a list of winnerCells.
 
-        # Move active cells to last active, and lastactive to not active.
-        self.UpdateFCellActivity()
-
-        self.burstingCols    = []
-        self.notBurstingCols = []
-
-        for col in self.columnSDR:
-            predictedCellsThisCol = []
-            activeThisColumn = []
-            winnerThisColumn = -1
-
-            # Check if any cells in column are predicted. If yes then make a note of them.
+        # Make the not-bursting columns winner cells active.
+        for col in self.notBurstingCols:
             for cell in range( col * self.vectorMemoryDict[ "cellsPerColumn" ], ( col * self.vectorMemoryDict[ "cellsPerColumn" ] ) + self.vectorMemoryDict[ "cellsPerColumn" ] ):
-                if self.FCells[ cell ].predicted:
-                    predictedCellsThisCol.append( cell )
+                if self.FCells[ cell ].IsWinner():
+                    self.FCells[ cell ].MakeActive()
+                    NoRepeatInsort( self.activeFCells, cell )
 
-            # If result was predicted by FCells...
-            if len( predictedCellsThisCol ) > 0:
-                self.notBurstingCols.append( col )
-
-                # Choose the winner cell.
-                winnerThisColumn = self.ThereCanBeOnlyOne( predictedCellsThisCol )
-                # Make only winner active.
-                activeThisColumn.append( winnerThisColumn )
-
-            # If result wasn't predicted by FCells...
-            else:
-                self.burstingCols.append( col )
-
-                # Make all cells in column active.
-                for cell in range( col * self.vectorMemoryDict[ "cellsPerColumn" ], ( col * self.vectorMemoryDict[ "cellsPerColumn" ] ) + self.vectorMemoryDict[ "cellsPerColumn" ] ):
-                    activeThisColumn.append( cell )
-
-                # If working memory has a prediction for this column then make it the winner.
-                winnerThisColumn = randrange( col * self.vectorMemoryDict[ "cellsPerColumn" ], ( col * self.vectorMemoryDict[ "cellsPerColumn" ] ) + self.vectorMemoryDict[ "cellsPerColumn" ] )
-
-            # Make the chosen cells active and winners.
-            if len( activeThisColumn ) > 0:
-                for toAct in activeThisColumn:
-                    self.FCells[ toAct ].active = True
-                    self.activeFCells.append( toAct )
-            else:
-                print( "No cells chosen active this column.")
-                exit()
-            if winnerThisColumn != -1:
-                self.FCells[ winnerThisColumn ].winner = True
-                self.winnerFCells.append( winnerThisColumn )
-            else:
-                print( "No cells chosen winner this column.")
-                exit()
+        # Make every cell in the bursting columns active.
+        for col in self.burstingCols:
+            for cell in range( col * self.vectorMemoryDict[ "cellsPerColumn" ], ( col * self.vectorMemoryDict[ "cellsPerColumn" ] ) + self.vectorMemoryDict[ "cellsPerColumn" ] ):
+                self.FCells[ cell ].MakeActive()
+                NoRepeatInsort( self.activeFCells, cell )
 
     def PredictFCells( self ):
     # Clear old predicted FCells and generate new predicted FCells.
 
-        # Refresh old prediction.
-        for cell in self.FCells:
-            cell.predicted = False
-        self.predictedFCells = []
+# CHANGE THIS TO BE RUN IF WE WANT PREDICTED CELLS GIVEN A PARTICULAR VECTOR AND INCIDENT CELLS, SO IT RECEIVES THE INCIDENT CELLS AND VECTOR AND RETURNS PREDICTION.
 
-        # Get the predicted FCells and make them predicted state.
-        self.predictedFCells = self.FToFSegmentStruct.StimulateSegments( self.FCells, self.activeFCells, self.newVectorSDR )
+        # Stimulate the segments using the incident cells.
+        self.FToFSegmentStruct.StimulateSegments( self.FCells, self.activeFCells )
+
+        # Use the stimulated segments to get the most confident segments to return a vector and predictedCells.
+        self.predictedFCells, motorVector = self.FToFSegmentStruct.ChooseVectorSegment( self.FCells )
 
         # Make the selected cells predicted state.
         for predCell in self.predictedFCells:
             self.FCells[ predCell ].predicted = True
 
+        return motorVector
+
+    def ActivateSegments( self, lastVectorSDR, lastPositionSDR ):
+    # Perform learning on segments and refresh segments, then activate new ones.
+
+        self.FToFSegmentStruct.SegmentLearning( self.FCells, self.activeFCells, self.lastActiveFCells, lastVectorSDR, lastPositionSDR )
+
+        # Refresh segment states.
+        self.FToFSegmentStruct.UpdateSegmentActivity( self.FCells )
+
+        # Activate segments using the current active FCells as incident cells.
+        self.FToFSegmentStruct.StimulateSegments( self.FCells, self.activeFCells )
+
+    def GetMotorVectorSDR( self ):
+    # Find if there is a confident segment, and if so then get its motor vector SDR.
+
+        return self.FToFSegmentStruct.ChooseVectorSegment() [ 1 ]
+
     def UpdateFCellActivity( self ):
     # Updates the FCell states for a next time step.
 
+# I SHOULD PROBABLY CALL A FUNCTION IN THE CELLS TO DO THIS INSTEAD.
         # Clean up old active, lastActive, winner, and lastWinner FCells.
         for lActCell in self.lastActiveFCells:
             self.FCells[ lActCell ].lastActive = False
@@ -181,56 +186,39 @@ class NewVectorMemory:
             self.FCells[ winCell ].lastWinner = True
         self.winnerFCells = []
 
-    def GetMotorVector( self ):
-    # Check if the winning predicted segments have above threshold confidence. If they do then return a motor vector of appropriate size.
+        # Refresh old prediction.
+        for pCell in self.predictedFCells:
+            self.FCells[ pCell ].predicted = False
+        self.predictedFCells = []
 
-        if self.FToFSegmentStruct.SegmentsAreConfident():
-            return self.FToFSegmentStruct.GetVector()
+        # Refresh the column states.
+        self.burstingCols    = []
+        self.notBurstingCols = []
 
-    def Compute( self, columnSDR, newVectorSDR ):
+    def Compute( self, columnSDR, lastVectorSDR, lastPositionSDR ):
     # Compute the action of vector memory, and learn on the synapses.
 
         self.lastColumnSDR = self.columnSDR.copy()
         self.columnSDR     = columnSDR.sparse.tolist()
-
-        self.lastVectorSDR = self.newVectorSDR.copy()
-        self.newVectorSDR  = newVectorSDR.copy()
 
         # Safety check for column dimensions.
         if columnSDR.size != self.vectorMemoryDict[ "columnDimensions" ]:
             print( "VM input column dimensions must be same as input SDR dimensions." )
             exit()
 
+        # Move active cells to last active, and lastactive to not active, and predicted to not.
+        self.UpdateFCellActivity()
+
+        # Choose a winner segment(s) from all active segments from last time step. Also chosoe winner FCells.
+        self.ChooseWinnerSegmentAndCells( lastVectorSDR, lastPositionSDR )
+
         # Clear old active cells and get new ones active cells for this time step.
-        startTime = time()
         self.ActivateFCells()
-        print( "Activate: " + str( time() - startTime ) )
 
-        # If any winner cell was not predicted (bursting) then create a new segment terminal to it.
-        startTime = time()
-        if len( self.burstingCols ) / self.vectorMemoryDict[ "numActiveColumnsPerInhArea" ] > 0.5:
-            self.FToFSegmentStruct.CreateSegment( self.FCells, self.lastColumnSDR, self.columnSDR, self.lastWinnerFCells, self.winnerFCells, self.lastVectorSDR )
+        # Perform learning on segments and refresh segments, then activate new ones.
+        self.ActivateSegments( lastVectorSDR, lastPositionSDR )
 
-#        for burCol in self.burstingCols:
-#            for burCell in range( burCol * self.vectorMemoryDict[ "cellsPerColumn" ], ( burCol * self.vectorMemoryDict[ "cellsPerColumn" ] ) + self.vectorMemoryDict[ "cellsPerColumn" ] ):
-#                if self.FCells[ burCell ].winner:
-#                    self.FToFSegmentStruct.CreateSegment( self.FCells, self.lastColumnSDR, burCol, self.lastWinnerFCells, burCell, self.lastVectorSDR )
-#                    break
-        print( "Create Segment: " + str( time() - startTime ) )
+        # Get motor vector from active segments.
+        newMotorSDR = self.GetMotorVectorSDR()
 
-        # Perform learning on segments.
-        startTime = time()
-        self.FToFSegmentStruct.SegmentLearning( self.FCells, self.activeFCells, self.lastActiveFCells )
-        print( "Segment Learning: " + str( time() - startTime ) )
-
-        # Refresh segment states.
-        startTime = time()
-        self.FToFSegmentStruct.UpdateSegmentActivity( self.FCells )
-        print( "Update Actvitiy: " + str( time() - startTime ) )
-
-# COULD EVEN SPEED THIS UP BY NOT RUNNING. SIMPLY WHEN WE GO TO ACTIVE CELLS WE USE THE ACTIVE TERMINAL COLUMNS TO GET THE SEGMENTS WHICH ARE TERMINAL THERE AND CHECK THEM ONLY.
-        startTime = time()
-        self.PredictFCells()
-        print( "Predict: " + str( time() - startTime ) )
-
-        return self.GetMotorVector()
+        return newMotorSDR

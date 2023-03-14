@@ -23,11 +23,6 @@ class FCell:
         self.asIncident = []            # Keeps track of what segments this cell is incident on.
         self.asTerminal = []
 
-# PERHAPS WE DON'T NEED? COULD JUST USE THE asTerminal LIST TO GET ALL SEGMENTS TERMINAL AND THEN ADD UP THEIR PERMANENCE STRENGTH... BUT MIGHT BE SLOWER.
-        self.terminalActivation = 0.0
-
-#        self.isTerminalCell = 0           # Number of segments this cell is terminal on.
-
         # For data collection.
         self.activeCount = 0
         self.states      = []
@@ -117,17 +112,17 @@ class FCell:
 
         return BinarySearch( self.asIncident, segIndex )
 
-    def RefreshTerminalActivation( self ):
-    # Refreshes terminalActivation back to 0.0
+    def SetAsWinner( self ):
+    # Set as winner.
 
-        self.terminalActivation = 0.0
+        self.winner = True
 
-    def AddTerminalStimulation( self, stimAdd ):
-    # Adds permanence value to terminalActivation.
+    def IsWinner( self ):
+    # Return True if it is winner.
 
-        self.terminalActivation += stimAdd
+        return self.winner
 
-    def GetTerminalActivation( self ):
-    # Returns terminalActivation.
+    def MakeActive( self ):
+    # Make cell active.
 
-        return self.terminalActivation
+        self.active = True

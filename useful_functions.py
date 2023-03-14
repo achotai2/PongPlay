@@ -149,10 +149,10 @@ def ModThisSynapse( currentValue, howMuch, minValue, maxValue ):
 
     newValue = currentValue + howMuch
 
-    if newValue > 1.0:
-        return 1.0
-    elif newValue <= 0.0:
-        return 0.0
+    if newValue > maxValue:
+        return maxValue
+    elif newValue <= minValue:
+        return minValue
     else:
         return newValue
 
@@ -267,3 +267,29 @@ def CalculateDistanceScore( vector, vectorDimensions, vectorCenter, standardDevi
     score = ( 1 / standardDeviation ) * 0.159154943 * exp( -0.5 * ( numStdDev ) ** 2 )
 
     return score
+
+def IndexOfGreatest( list ):
+# Finds the greatest element in the list and returns the index.
+
+    greatest = None
+    index    = None
+
+    for i, value in enumerate( list ):
+        if greatest == None or value > greatest:
+            greatest = value
+            index    = i
+
+    return index
+
+def NoRepeatConcatenate( list1, list2 ):
+# Concatenate the two lists in a sorted way.
+
+    returnList = []
+
+    for item1 in list1:
+        NoRepeatInsort( returnList, item1 )
+
+    for item2 in list2:
+        NoRepeatInsort( returnList, item2 )
+
+    return returnList

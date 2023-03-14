@@ -1,53 +1,28 @@
 import sys
 import numpy
-from random import randrange, sample, getrandbits
+from random import randrange, sample, getrandbits, choice
 from bisect import bisect_left
 from useful_functions import Within, BinarySearch, DelIfIn, NoRepeatInsort
 from new_vector_memory import NewVectorMemory
+from classifier import Classifier
 
 from htm.bindings.sdr import SDR, Metrics
 import htm.bindings.encoders
 ScalarEncoder = htm.bindings.encoders.ScalarEncoder
 ScalarEncoderParameters = htm.bindings.encoders.ScalarEncoderParameters
 from htm.bindings.algorithms import SpatialPooler
-from htm.bindings.algorithms import Classifier
 
 class AgentRun:
 
-    def __init__( self, name, senseResX, senseResY, motorVectorDims ):
+    def __init__( self, name, senseResX, senseResY, screenWidth, screenHeight ):
 
         self.ID = name
-
-        # Set up eye input encoding parameters.
-        self.resolutionX = senseResX
-        self.resolutionY = senseResY
-        self.numColours  = 3                                                    # Red, Green, Blue
-
-        self.eyeInputEncodingWidth  = self.resolutionX * self.resolutionY * self.numColours
-
-        # Set up vector encoder parameters.
-        XEncodeParams = ScalarEncoderParameters()
-        XEncodeParams.activeBits = 5
-        XEncodeParams.radius     = 10
-        XEncodeParams.clipInput  = True
-        XEncodeParams.minimum    = -200
-        XEncodeParams.maximum    = 200
-        XEncodeParams.periodic   = False
-        self.XTransformEncoder = ScalarEncoder( XEncodeParams )
-        YEncodeParams = ScalarEncoderParameters()
-        YEncodeParams.activeBits = 5
-        YEncodeParams.radius     = 20
-        YEncodeParams.clipInput  = True
-        YEncodeParams.minimum    = -200
-        YEncodeParams.maximum    = 200
-        YEncodeParams.periodic   = False
-        self.YTransformEncoder = ScalarEncoder( YEncodeParams )
-
-        self.transformEncodingWidth = self.XTransformEncoder.size + self.YTransformEncoder.size
 
         # The dictionary for defining useful terms.
         self.termsDict = {
             "columnDimensions"          : 2048,                 # Dimensions of the column space.
+            "transformColumnDimensions" : 2048,                  # Dimenions of transformation column space
+            "positionColumnDimensions"  : 2048,                  # Dimenions of position column space
             "boostStrength"             : 0.5,                  # Spatial memory boostStrength.
             "numActiveColumnsPerInhArea": 40,                   # Number of columns active given input.
             "cellsPerColumn"            : 4,                    # Number of cells per column.
@@ -63,7 +38,14 @@ class AgentRun:
             "maxIncidentOnCell"         : 10,                   # The maximum number of segments that cell can be incident to.
             "maxTotalSegments"          : 5000,                 # The maximum number of segments allowed in the network.
             "confidenceConfident"       : 0.8,                  # The confidenceScore above which we consider the segment is a good prediction.
+            "numTransformDimensions"    : 4,                    # The number of dimensions in the transform vector.
         }
+
+        # Set up eye input encoding parameters.
+        self.resolutionX = senseResX
+        self.resolutionY = senseResY
+        self.numColours  = 3                                                    # Red, Green, Blue
+        self.eyeInputEncodingWidth  = self.resolutionX * self.resolutionY * self.numColours
 
         # The eye input pooler.
         self.sp = SpatialPooler(
@@ -82,15 +64,61 @@ class AgentRun:
             wrapAround                 = False
         )
 
+        # Set up vector encoder parameters.
+        vectorEncodeParams = ScalarEncoderParameters()
+        vectorEncodeParams.activeBits = 5
+        vectorEncodeParams.radius     = 10
+        vectorEncodeParams.clipInput  = True
+        vectorEncodeParams.minimum    = -200
+        vectorEncodeParams.maximum    = 200
+        vectorEncodeParams.periodic   = False
+        self.xEyeEncoder  = ScalarEncoder( vectorEncodeParams )
+        self.yEyeEncoder  = ScalarEncoder( vectorEncodeParams )
+        self.xMoveEncoder = ScalarEncoder( vectorEncodeParams )
+        self.yMoveEncoder = ScalarEncoder( vectorEncodeParams )
+        self.transformEncodingWidth = self.xEyeEncoder.size + self.yEyeEncoder.size + self.xMoveEncoder.size + self.yMoveEncoder.size
+
         # The transformation input pooler.
         self.trp = SpatialPooler(
             inputDimensions            = ( self.transformEncodingWidth, ),
-            columnDimensions           = ( 2048, ),
+            columnDimensions           = ( self.termsDict[ "transformColumnDimensions" ], ),
             potentialPct               = 0.85,
             potentialRadius            = self.transformEncodingWidth,
             globalInhibition           = True,
             localAreaDensity           = 0,
-            numActiveColumnsPerInhArea = 40,
+            numActiveColumnsPerInhArea = self.termsDict[ "numActiveColumnsPerInhArea" ],
+            synPermInactiveDec         = 0.005,
+            synPermActiveInc           = 0.04,
+            synPermConnected           = 0.1,
+            boostStrength              = self.termsDict[ "boostStrength" ],
+            seed                       = -1,
+            wrapAround                 = False
+        )
+
+        self.transformClassifier = Classifier( self.termsDict[ "transformColumnDimensions" ], self.termsDict[ "numTransformDimensions" ], 10 )
+        self.eyeOnSelf = True
+
+        # Set up vector encoder parameters.
+        positionEncodeParams = ScalarEncoderParameters()
+        positionEncodeParams.activeBits = 5
+        positionEncodeParams.radius     = 10
+        positionEncodeParams.clipInput  = True
+        positionEncodeParams.minimum    = -int( max( screenWidth, screenHeight ) / 2 )
+        positionEncodeParams.maximum    = int( max( screenWidth, screenHeight ) / 2 )
+        positionEncodeParams.periodic   = False
+        self.xPosEncoder  = ScalarEncoder( positionEncodeParams )
+        self.yPosEncoder  = ScalarEncoder( positionEncodeParams )
+        self.positionEncodingWidth = self.xPosEncoder.size + self.yPosEncoder.size
+
+        # The transformation input pooler.
+        self.prp = SpatialPooler(
+            inputDimensions            = ( self.positionEncodingWidth, ),
+            columnDimensions           = ( self.termsDict[ "positionColumnDimensions" ], ),
+            potentialPct               = 0.85,
+            potentialRadius            = self.positionEncodingWidth,
+            globalInhibition           = True,
+            localAreaDensity           = 0,
+            numActiveColumnsPerInhArea = self.termsDict[ "numActiveColumnsPerInhArea" ],
             synPermInactiveDec         = 0.005,
             synPermActiveInc           = 0.04,
             synPermConnected           = 0.1,
@@ -103,9 +131,6 @@ class AgentRun:
 
         self.lastVector = []
         self.newVector  = []
-        for i in range( motorVectorDims ):
-            self.lastVector.append( 0 )
-            self.newVector.append( 0 )
 
         # Stats for end report.
         self.top_left     = []
@@ -222,6 +247,40 @@ class AgentRun:
 
         return bitRepSDR
 
+    def TrainMotion( self, vector, vectorSDR ):
+    # Train the classifiers on the vector componants, and the transformationSDR.
+
+        self.transformClassifier.Learn( vectorSDR, vector )
+
+    def InferMotion( self, objectList, sensePosX, sensePosY, vectorSDR ):
+    # Infer from the vectorSDR what the movement vector is.
+    # Also alternate the eye between enemy and Agent.
+
+        newVector = []
+
+        # Change eye position alternating from object and enemy.
+        if self.eyeOnSelf:
+            eyePos = objectList[ 1 ]
+            self.eyeOnSelf = False
+        else:
+            eyePos = objectList[ 0 ]
+            self.eyeOnSelf = True
+        newVector.append( eyePos[ 0 ] - sensePosX )
+        newVector.append( eyePos[ 1 ] - sensePosY )
+
+        # Get list of probable inferred vectors from vectorSDR
+        probableVectors = self.transformClassifier.Infer( vectorSDR )
+
+        if len( probableVectors ) == 0:
+            # Generate random motion of the agent.
+            newVector.append( choice( [ -1, 1 ] ) )
+            newVector.append( choice( [ -1, 1 ] ) )
+        else:
+            newVector.append( probableVectors[ 0 ][ 1 ][ 2 ] )
+            newVector.append( probableVectors[ 0 ][ 1 ][ 3 ] )
+
+        return newVector
+
     def EncodeSenseData ( self, sensePosX, sensePosY, objectList, noisePct ):
     # Get sensory information and encode it as an SDR in the sense network.
 
@@ -238,17 +297,33 @@ class AgentRun:
     def EncodeTransformationData( self, vector ):
     # Get vector and encode it as an SDR.
 
-        XBits = self.XTransformEncoder.encode( vector[ 0 ] )
-        YBits = self.YTransformEncoder.encode( vector[ 1 ] )
+        xEyeBits  = self.xEyeEncoder.encode( vector[ 0 ] )
+        yEyeBits  = self.yEyeEncoder.encode( vector[ 1 ] )
+        xMoveBits = self.xMoveEncoder.encode( vector[ 2 ] )
+        yMoveBits = self.yMoveEncoder.encode( vector[ 3 ] )
 
-        encoding     = SDR( self.transformEncodingWidth ).concatenate( [ XBits, YBits ] )
+        encoding     = SDR( self.transformEncodingWidth ).concatenate( [ xEyeBits, yEyeBits, xMoveBits, yMoveBits ] )
         transformSDR = SDR( self.trp.getColumnDimensions() )
         self.trp.compute( encoding, True, transformSDR )
 
         return transformSDR
 
-    def Brain ( self, objectList, sensePosX, sensePosY, noisePct, randomInput ):
+    def EncodePositionData( self, position ):
+    # Get position and encode it as an SDR.
+
+        xPosBits  = self.xPosEncoder.encode( position[ 0 ] )
+        yPosBits  = self.yPosEncoder.encode( position[ 1 ] )
+
+        encoding     = SDR( self.positionEncodingWidth ).concatenate( [ xPosBits, yPosBits ] )
+        positionSDR = SDR( self.prp.getColumnDimensions() )
+        self.prp.compute( encoding, True, positionSDR )
+
+        return positionSDR
+
+    def Brain ( self, objectList, sensePosX, sensePosY, lastVector, lastPosition, noisePct, randomInput ):
     # The central brain function of the agent.
+
+        self.lastVector = lastVector.copy()
 
         if randomInput:
             noisePct = 1.00
@@ -256,25 +331,20 @@ class AgentRun:
         # Encode the input column SDR for current position.
         senseSDR = self.EncodeSenseData( sensePosX, sensePosY, objectList, noisePct )
 
-        # Generate the Agent's motion vector.
-        self.lastVector = self.newVector.copy()
-
-        # Generate random motion of the sense organ.
-        whichObj       = randrange( len( objectList ) )
-        chosePos       = [ objectList[ whichObj ][ 0 ], objectList[ whichObj ][ 1 ] ]
-        self.newVector[ 0 ] = chosePos[ 0 ] - sensePosX
-        self.newVector[ 1 ] = chosePos[ 1 ] - sensePosY
-
         # Encode the transformation vector and get column SDR.
-        newVectorSDR = self.EncodeTransformationData( self.newVector ).sparse.tolist()
+        lastVectorSDR   = self.EncodeTransformationData( lastVector ).sparse.tolist()
+        # Encode the position and get its columns SDR.
+        lastPositionSDR = self.EncodePositionData( lastPosition ).sparse.tolist()
+
+        # Train the classifiers on the vector and transformSDR
+        self.TrainMotion( lastVector, lastVectorSDR )
 
         # Compute the action of vector memory, and learn on the synapses.
-        newVectorSDR = self.vp.Compute( senseSDR )
+        newVectorSDR = self.vp.Compute( senseSDR, lastVectorSDR, lastPositionSDR )
 
-        toReturn = []
-        for x in range( len( self.newVector ) ):
-            toReturn.append( x )
-        for y in range( len( motorVector ) ):
-            toReturn.append( y )
+        # Decode the newVectorSDR into a vector.
+        newVector1 = self.InferMotion( objectList, sensePosX, sensePosY, newVectorSDR )
 
-        return toReturn
+        self.newVector = newVector1.copy()
+
+        return newVector1
