@@ -21,20 +21,21 @@ class AgentRun:
         # The dictionary for defining useful terms.
         self.termsDict = {
             "columnDimensions"          : 2048,                 # Dimensions of the column space.
-            "transformColumnDimensions" : 2048,                  # Dimenions of transformation column space
-            "positionColumnDimensions"  : 2048,                  # Dimenions of position column space
+            "transformColumnDimensions" : 2048,                 # Dimenions of transformation column space
+            "positionColumnDimensions"  : 2048,                 # Dimenions of position column space
+#            "potentialPct"              : 0.85,                 # Used by SpatialPooler for what pct of columns are connected to their input.
             "boostStrength"             : 0.5,                  # Spatial memory boostStrength.
             "numActiveColumnsPerInhArea": 40,                   # Number of columns active given input.
             "cellsPerColumn"            : 4,                    # Number of cells per column.
             "FActivationThresholdMin"   : 30,                   # Min threshold of active connected incident synapses...
             "FActivationThresholdMax"   : 30,                   # Max threshold of active connected incident synapses...# needed to activate segment.
             "initialPermanence"         : 0.3,                  # Initial permanence of a new synapse.
-            "permanenceIncrement"       : 0.05,                 # Amount by which permanences of synapses are incremented during learning.
-            "permanenceDecrement"       : 0.01,                # Amount by which permanences of synapses are decremented during learning.
+            "permanenceIncrement"       : 0.04,                 # Amount by which permanences of synapses are incremented during learning.
+            "permanenceDecrement"       : 0.005,                 # Amount by which permanences of synapses are decremented during learning.
             "permanenceDecay"           : 0.001,                # Amount to decay permances each time step if < 1.0.
             "permanenceLowerThreshold"  : 0.1,                  # The lower threshold for synapses.
             "maxSynapsesToAddPer"       : 1,                    # The maximum number of incident synapses added to a segment during learning.
-            "maxSynapsesPerSegment"     : 100,                   # Maximum number of incident synapses allowed on a segment.
+            "maxSynapsesPerSegment"     : 100,                  # Maximum number of incident synapses allowed on a segment.
             "maxIncidentOnCell"         : 10,                   # The maximum number of segments that cell can be incident to.
             "maxTotalSegments"          : 5000,                 # The maximum number of segments allowed in the network.
             "confidenceConfident"       : 0.8,                  # The confidenceScore above which we consider the segment is a good prediction.

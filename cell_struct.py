@@ -4,7 +4,7 @@ from collections import Counter
 from useful_functions import BinarySearch, NoRepeatInsort, IndexIfItsIn, FastIntersect, GenerateUnitySDR, NumStandardDeviations, CalculateDistanceScore, DelIfIn
 import math
 
-class FCell:
+class Cell:
 
     def __init__( self, colID, vectorMemoryDict ):
     # Create a new feature level cell with synapses to OCells.
@@ -98,10 +98,15 @@ class FCell:
 
         DelIfIn( self.asTerminal, segIndex )
 
+    def ReturnColumn( self ):
+    # Return my column.
+
+        return self.column
+
     def ReturnIncidentOn( self ):
     # Returns this cells column, and a list of segments this cell is incident on.
 
-        return self.column, self.asIncident.copy()
+        return self.asIncident.copy()
 
     def ReturnTerminalOn( self ):
 

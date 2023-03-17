@@ -281,6 +281,19 @@ def IndexOfGreatest( list ):
 
     return index
 
+def IndexOfLeast( list ):
+# Finds the least element in the list and returns the index.
+
+    least = None
+    index = None
+
+    for i, value in enumerate( list ):
+        if least == None or value < least:
+            least = value
+            index = i
+
+    return index
+
 def NoRepeatConcatenate( list1, list2 ):
 # Concatenate the two lists in a sorted way.
 

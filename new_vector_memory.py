@@ -1,7 +1,7 @@
 from random import sample, randrange
 from operator import add
 from segment_struct import SegmentStructure
-from cell_struct import FCell
+from cell_struct import Cell
 from useful_functions import NoRepeatInsort, BinarySearch, ReturnMaxIndices, FastIntersect
 from numpy import setdiff1d
 from time import time
@@ -21,7 +21,7 @@ class NewVectorMemory:
         # Create cells in feature layer.
         self.FCells = []
         for i in range( vectorMemoryDict[ "columnDimensions" ] * vectorMemoryDict[ "cellsPerColumn" ] ):
-            self.FCells.append( FCell( int( i / vectorMemoryDict[ "cellsPerColumn" ] ), vectorMemoryDict ) )
+            self.FCells.append( Cell( int( i / vectorMemoryDict[ "cellsPerColumn" ] ), vectorMemoryDict ) )
         self.activeFCells     = []
         self.lastActiveFCells = []
         self.winnerFCells     = []
